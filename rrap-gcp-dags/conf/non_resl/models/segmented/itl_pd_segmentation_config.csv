@@ -1,0 +1,20 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_CROSS_DEFAULT_ORIG,MODEL_EXCL_F_V2,TREATMENT_F,PRINCIPAL_BAL,OS_BAL_AMT_V2,PRD_ID,Output
+DEF,,,DEF,,A,,,,99
+DEF,>=0,,DEF,,A,,,,99
+>= 753,>=753,,CUR,N,A,,,,1
+"[735, 752]",>=735,<=752,CUR,N,A,,,,2
+"[717, 734]",>=717,<=734,CUR,N,A,,,,3
+"[693, 716]",>=693,<=716,CUR,N,A,,,,4
+"[666, 692]",>=666,<=692,CUR,N,A,,,,5
+"[640, 665]",>=640,<=665,CUR,N,A,,,,6
+"[602, 639]",>=602,<=639,CUR,N,A,,,,7
+"[574, 601]",>=574,<=601,CUR,N,A,,,,8
+<=573,,<=573,CUR,N,A,,,,9
+Special Segment: Small Balances - Treatment_flag = A  AND Model_Excl  =  Y  AND (principal_bal =0 OR (principal_bal + accr_int + addon_bal) <100),,,CUR,Y,A,==0,,,10
+Special Segment: Small Balances - Treatment_flag = A  AND Model_Excl  =  Y  AND (principal_bal =0 OR (principal_bal + accr_int + addon_bal) <100),>=0,,CUR,Y,A,==0,,,10
+Special Segment: Small Balances - Treatment_flag = A  AND Model_Excl  =  Y  AND (principal_bal =0 OR (principal_bal + accr_int + addon_bal) <100),,,CUR,Y,A,,<100,,10
+Special Segment: Small Balances - Treatment_flag = A  AND Model_Excl  =  Y  AND (principal_bal =0 OR (principal_bal + accr_int + addon_bal) <100),>=0,,CUR,Y,A,,<100,,10
+Special Segment: Home Improvement & Other - Treatment_flag = A  AND Model_Excl  =  Y AND Product ID = S11 OR S14,,,CUR,Y,A,,,S11,11
+Special Segment: Home Improvement & Other - Treatment_flag = A  AND Model_Excl  =  Y AND Product ID = S11 OR S14,>=0,,CUR,Y,A,,,S11,11
+Special Segment: Home Improvement & Other - Treatment_flag = A  AND Model_Excl  =  Y AND Product ID = S11 OR S14,,,CUR,Y,A,,,S14,11
+Special Segment: Home Improvement & Other - Treatment_flag = A  AND Model_Excl  =  Y AND Product ID = S11 OR S14,>=0,,CUR,Y,A,,,S14,11

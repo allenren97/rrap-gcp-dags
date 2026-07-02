@@ -1,0 +1,20 @@
+﻿Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,MODEL_EXCL_F_V2,TREATMENT_F,PIT_STATUS_CROSS_DEFAULT_ORIG,SUB_PORT_F,PRD_ID,MONTH_DEF,OS_BAL_AMT_V2_LOWER,OS_BAL_AMT_V2_UPPER,TOT_CRNT_BAL_AMT,Output
+Special Segment 8,>0,,Y,A,DEF,DIRECT,,>24,,,,8
+Special Segment 8,,<=0,Y,A,DEF,DIRECT,,>24,,,,8
+Special Segment 8,,,Y,A,DEF,DIRECT,,>24,,,,8
+Special Segment 7,>0,,Y,A,DEF,DIRECT,,<=24,<1,,,7
+Special Segment 7,,<=0,Y,A,DEF,DIRECT,,<=24,<1,,,7
+Special Segment 7,,,Y,A,DEF,DIRECT,,<=24,<1,,,7
+Special Segment 7,>0,,Y,A,DEF,DIRECT,,<=24,,,==0,7
+Special Segment 7,,<=0,Y,A,DEF,DIRECT,,<=24,,,==0,7
+Special Segment 7,,,Y,A,DEF,DIRECT,,<=24,,,==0,7
+Special Segment 6,>0,,N,A,DEF,DIRECT,"NOT IN ('S05','S08')",<=24,>=1,<1000,,6
+Special Segment 6,,<=0,N,A,DEF,DIRECT,"NOT IN ('S05','S08')",<=24,>=1,<1000,,6
+Special Segment 6,,,N,A,DEF,DIRECT,"NOT IN ('S05','S08')",<=24,>=1,<1000,,6
+Special Segment 5,>0,,N,A,DEF,DIRECT,"IN ('S05','S08')",<=24,,,,5
+Special Segment 5,,<=0,N,A,DEF,DIRECT,"IN ('S05','S08')",<=24,,,,5
+Special Segment 5,,,N,A,DEF,DIRECT,"IN ('S05','S08')",<=24,,,,5
+Segment 4,>=466,,N,A,DEF,DIRECT,"NOT IN ('S05','S08')",<=24,>=1000,,,4
+Segment 3,>=389,<=465,N,A,DEF,DIRECT,"NOT IN ('S05','S08')",<=24,>=1000,,,3
+Segment 2,>=266,<=388,N,A,DEF,DIRECT,"NOT IN ('S05','S08')",<=24,>=1000,,,2
+Segment 1,,<266,N,A,DEF,DIRECT,"NOT IN ('S05','S08')",<=24,>=1000,,,1

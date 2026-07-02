@@ -1,0 +1,56 @@
+"PRD_SYS_CD","SRC_PRD_CD","SRC_SUB_PRD_CD","EFF_FROM_YR_MTH","EFF_TO_YR_MTH","BASEL_PRD_CD","BASEL_PRD_DESC","PRD_DESC","LTV_TP_CD","SML_BUS_F","CONSM_SCORECRD_EXCLSN_F","CONSM_PRD_TREATMNT_CD","CRNT_F","INSRT_PROCESS_TMSTMP","UPDT_PROCESS_TMSTMP"
+KS   ,VFB       ,TB        ,"201812","999912",CC        ,Credit Card,Splash Small Business Visa,VISA      ,Y,Y,Z         ,Y,2019-01-21-16.20.50.000000,2019-01-21-16.20.50.000000
+KS   ,AXG       ,GS        ,"200001","999912",CC        ,Credit Card,Scotia AMEX GOLD,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,ST        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,CC        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-25-10.25.16.000000,2014-07-25-10.25.16.000000
+KS   ,SCL       ,RS        ,"200001","999912",LOC       ,Line Of Credit,Scotia Line (including Scotia Student Line),LOC       ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,SS        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,BLV       ,MB        ,"200001","999912",LOC       ,Line Of Credit,Business Line Visa - Momentum,VISA      ,Y,Y,Z         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,SL        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,LOC       ,BC        ,"200001","999912",SL        ,Student Loan,Goverment Student Loans,VISA      ,N,Y,S         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,SSL       ,LN        ,"200001","999912",SL        ,Student Loan,Scotia Student Loan,LOC       ,N,Y,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,NH        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VGD       ,BA        ,"200001","999912",CC        ,Credit Card,VISA Gold/Passport,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VLR       ,RC        ,"200001","999912",CC        ,Credit Card,Value VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,BLV       ,UNI       ,"200001","999912",LOC       ,Line Of Credit,Business Line Visa,VISA      ,Y,Y,Z         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,BLV       ,AGU       ,"200001","999912",LOC       ,Line Of Credit,Business Line Visa - Agr,VISA      ,Y,Y,Z         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,SCL       ,IM        ,"200001","999912",LOC       ,Line Of Credit,Scotia Line (including Scotia Student Line),LOC       ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,AXG       ,GC        ,"200001","999912",CC        ,Credit Card,Scotia AMEX GOLD,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,SSL       ,LI        ,"200001","999912",SL        ,Student Loan,Scotia Line (including Scotia Student Line),LOC       ,N,Y,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,BLV       ,INC       ,"200001","999912",LOC       ,Line Of Credit,Business Line Visa,VISA      ,Y,Y,Z         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VFF       ,F1        ,"201504","999912",CC        ,Credit Card,Scotiabank GM VISA Infinite Card,VISA      ,N,N,A         ,Y,2015-05-05-11.54.34.000000,2015-05-05-11.54.34.000000
+KS   ,VCL       ,SC        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,SCL       ,CS        ,"200001","999912",LOC       ,Line Of Credit,Scotia Line (including Scotia Student Line),LOC       ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,SV        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,ZZ        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,SCL       ,INE       ,"200001","999912",LOC       ,Line Of Credit,Scotia Line (including Scotia Student Line),LOC       ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VIC       ,RG        ,"200001","999912",LOC       ,Line Of Credit,Scotia Line VISA,LOC       ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VLR       ,RG        ,"200001","999912",CC        ,Credit Card,Value VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,NF        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VFA       ,A1        ,"201504","999912",CC        ,Credit Card,Scotiabank GM VISA Card,VISA      ,N,N,A         ,Y,2015-05-05-11.54.34.000000,2015-05-05-11.54.34.000000
+KS   ,VGD       ,NF        ,"200001","999912",CC        ,Credit Card,VISA Gold/Passport,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,CC        ,"200001","201109",CC        ,Credit Card,Moneyback VISA,VISA      ,Y,Y,Z         ,N,2014-07-11-17.34.36.000000,2014-07-25-10.25.16.000000
+KS   ,VGD       ,RG        ,"200001","999912",CC        ,Credit Card,VISA Gold/Passport,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,SCL       ,IL        ,"200001","999912",LOC       ,Line Of Credit,Scotia Line (including Scotia Student Line),LOC       ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,BLV       ,CV        ,"200001","999912",LOC       ,Line Of Credit,Business Line - Commercial,VISA      ,Y,Y,Z         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,RG        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,LOC       ,FD        ,"200001","999912",SL        ,Student Loan,Goverment Student Loans,VISA      ,N,Y,S         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VUS       ,RG        ,"201411","999912",CC        ,Credit Card,USD Dollar Visa,VISA      ,N,Y,S         ,Y,2014-12-12-14.55.04.000000,2014-12-12-14.55.04.000000
+KS   ,AXS       ,SC        ,"200001","999912",CC        ,Credit Card,Scotia AMEX Standard,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VCL       ,DM        ,"200001","999912",CC        ,Credit Card,Moneyback VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VLR       ,NF        ,"200001","999912",CC        ,Credit Card,Value VISA,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,SCL       ,RL        ,"200001","999912",LOC       ,Line Of Credit,Scotia Line (including Scotia Student Line),LOC       ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,AXP       ,PC        ,"200001","999912",CC        ,Credit Card,Scotia AMEX Platinum,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,SSL       ,SP        ,"200001","999912",SL        ,Student Loan,Scotia Professional Student Plan,LOC       ,N,Y,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VGD       ,PB        ,"200001","999912",CC        ,Credit Card,VISA Gold/Passport,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VGD       ,SP        ,"200001","999912",CC        ,Credit Card,VISA Gold/Passport,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,AXS       ,SS        ,"200001","999912",CC        ,Credit Card,Scotia AMEX Standard,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,BLV       ,AGI       ,"200001","999912",LOC       ,Line Of Credit,Business Line Visa - Agr,VISA      ,Y,Y,Z         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VGD       ,ST        ,"200001","999912",CC        ,Credit Card,VISA Gold/Passport,VISA      ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VIC       ,RS        ,"200001","999912",LOC       ,Line Of Credit,Scotia Line VISA,LOC       ,N,N,A         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,BLV       ,YY        ,"200001","999912",LOC       ,Line Of Credit,Business Line Visa - ScotiaGold,VISA      ,Y,Y,Z         ,Y,2014-07-11-17.34.36.000000,2014-07-11-17.34.36.000000
+KS   ,VFA       ,A3        ,"201511","999912",CC        ,Credit Card,Scotiabank More Rewards VISA Card,VISA      ,N,N,A         ,Y,2016-01-15-14.22.32.000000,2016-01-15-14.22.32.000000
+KS   ,VFB       ,B1        ,"201707","999912",CC        ,Credit Card,GM Small Business Visa,VISA      ,Y,Y,Z         ,Y,2017-08-25-10.26.21.000000,2017-08-25-10.26.21.000000
+KS   ,VFF       ,TR        ,"201710","999912",CC        ,Credit Card,Scotiabank Passport Visa Infinite,VISA      ,N,N,A         ,Y,2017-12-07-13.17.36.000000,2017-12-07-13.17.36.000000
+KS   ,VFF       ,TS        ,"201710","999912",CC        ,Credit Card,Scotiabank Passport Visa Infinite,VISA      ,N,N,A         ,Y,2017-12-07-13.17.36.000000,2017-12-07-13.17.36.000000
+KS   ,BLV       ,HHB,"202312","999912",CC,Credit Card,Business Line Visa - Home Hardware,VISA      ,Y,Y,Z         ,Y,2024-11-20-15.27.48.000000,2024-11-20-15.27.48.000000

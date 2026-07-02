@@ -1,0 +1,7 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_CROSS_DEFAULT_ORIG,MODEL_EXCL_F,TREATMENT_F,SUB_PPLTN_FLAG,Output
+Defaulted accounts,,,DEF,,,,99
+Special Segment,,,not in ('DEF'),Y,A,,98
+Transactor Segment,,<=1895,,,,T,1
+<= 906.5,,<= 906.5,,,,,2
+"(906.5, 934.5]",> 906.5,<= 934.5,,,,,3
+> 934.5,> 934.5,,,,,,4

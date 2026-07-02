@@ -1,0 +1,424 @@
+
+ /* THIS VERSION IS FOR PROD */
+
+/*Safe guard against accidental runs */
+/*data _null_;abort;run;*/
+
+%let rrap_dir=/sasdata/sasdi/sasprod;
+options mautosource sasautos=("&rrap_dir./macro/rrap", sasautos);
+%LET OUTPATH=/owpftp;
+
+%macro rrap_dlgd_autoexec();
+
+	%global mth_tm_id start_period_dt;
+	libname NZRRAP netezza server=cs2iwntzp01 database=EDRTLRP1D authdomain="NZ_Auth";
+	libname NZUSER netezza server=cs2iwntzp01 database=EDRTLRFRGP1D authdomain="NZ_Auth";
+
+	libname NZFRGUSR netezza server=cs2iwntzp01 database=FRG_USER_DATA authdomain="NZ_Auth";
+	libname NZTNG netezza server=cs2iwntzp01 database=TNGSTP1D AUTHDOMAIN="NZ_AUTH";
+
+	libname EDRRAPT db2 datasrc=DM1P1D schema=EDRRAPT authdomain=db2_auth;
+	LIBNAME control BASE "&rrap_dir/params/rrap";
+
+
+	%get_model_period_dates(product=spl);
+
+/*	%let start_period_dt=31OCT2016;*/
+
+	proc sql noprint;
+		select TM_ID into :mth_tm_id from nzrrap.TM_DIM
+		where tm_lvl='Month' and tm_lvl_end_dt = "&start_period_dt"d;
+	quit;
+	%PUT PROCESS MONTH: &start_period_dt.. MTH_TM_ID: &mth_tm_id.;
+
+%mend rrap_dlgd_autoexec;
+
+%macro rrap_ncrbtt_autoexec();
+%global dbname dbschema rundate;
+%let rundate=&sysdate9.;
+/*%let rundate=15AUG2016;*/
+
+	libname tngdata netezza server=cs2iwntzp01 database=TNGSTP1D      AUTHDOMAIN="NZ_AUTH";
+	libname nz_frg  netezza server=cs2iwntzp01 database=frg_user_data AUTHDOMAIN="NZ_AUTH" bulkunload=yes;
+
+	libname nzwrk   netezza server=cs2iwntzp01 database=EDRTLRFRGP1D  AUTHDOMAIN="NZ_AUTH" bulkunload=yes;
+
+	libname db2_org db2 database=DM1P1D schema=EDEDW;
+	libname db2_prd db2 database=DM1P1D SCHEMA=EDRRAPT;
+
+%let DBNAME=DM1P1D; %let DBSCHEMA=EDRRAPBTT;
+
+	LIBNAME BTT DB2 DATABASE="&DBNAME" SCHEMA="&DBSCHEMA" authdomain=db2_auth;
+
+%mend rrap_ncrbtt_autoexec;
+
+%macro rrap_spl_autoexec();
+/*Safe guard against accidental runs */
+/*data _null_;abort;run;*/
+
+%GLOBAL RRAP_DB FRG_DB RRAP_DB2;
+
+LIBNAME control BASE "&rrap_dir/params/rrap";
+LIBNAME intmed  BASE "&rrap_dir/data/rrap";
+
+* Netezza and DB2 Servers and Databases;
+* When making changes here, make sure to change the corresponding metadata library;
+
+%let NZ_server = cs2iwntzp01;
+%let RRAP_DB   = EDRTLRP1D; 
+%let FRG_DB    = EDRTLRFRGP1D;
+%let RRAP_DB2  = DM1P1D;
+
+/* Used to define connections to Netezza and DB2 */
+libname nzuser   netezza server = &NZ_server database = &FRG_DB     authdomain="NZ_Auth" bulkunload=yes ;
+libname nzintmed netezza server = &NZ_server database = &FRG_DB     authdomain="NZ_Auth" bulkunload=yes ;
+libname NZRRAP   netezza server = &NZ_server database = &RRAP_DB    authdomain="NZ_Auth" bulkunload=yes ;
+LIBNAME DB2RRAP  DB2 	 DATABASE=&RRAP_DB2  SCHEMA=EDRRAPT;
+
+/*In order to hard code dates, run the code below in Enterprise Guide; */
+
+/*************************************************************************
+
+	%include '/sasdata/sasdi/sasprod/macro/rrap/rrap_autoexec.sas';
+	%rrap_spl_autoexec;
+	%HARD_CODE_DATES(RUN_START_DATE=30APR2015,RUN_END_DATE=30APR2015);
+	%LIST_RRAP_PARAMETERS;
+
+*************************************************************************/
+%mend rrap_spl_autoexec;
+
+%MACRO RRAP_MOR_TNG_AUTOEXEC();
+/*data _null_;abort;run;*/
+%GLOBAL FRG_DB frg_lib;
+%let FRG_DB=FRG_USER_DATA;
+%let frg_lib=nzuser;
+
+/* NETEZZA */
+libname netcon netezza server=cs2iwntzp01 database=TNGSTP1D AUTHDOMAIN="NZ_AUTH";
+libname tngdata netezza server=cs2iwntzp01 database=TNGSTP1D AUTHDOMAIN="NZ_AUTH";
+
+libname nz_frg netezza database = frg_user_data server = cs2iwntzp01 AUTHDOMAIN="NZ_AUTH" bulkunload=yes;
+libname nzuser netezza database = frg_user_data server = cs2iwntzp01 AUTHDOMAIN="NZ_AUTH" bulkunload=yes;
+
+/* DB2 */
+libname db2_org db2 database=DM1P1D schema=EDEDW;
+libname db2_all db2 database=DM1P1D schema=EDRRAP;
+libname db2_tmdm db2 database=DM1P1D schema=EDEDWT;/*instrument fact uses this, revert this before promotion*/
+
+/* SAS */
+LIBNAME intmed BASE "&rrap_dir./data/rrap/mortgage/intermediate";
+LIBNAME results BASE "&rrap_dir./data/rrap/mortgage/results";
+LIBNAME control BASE "&rrap_dir/params/rrap";
+LIBNAME source BASE "&rrap_dir./data/rrap/mortgage/source";
+
+/*Compensation Control*/
+%global threshold;%let threshold=0.0001;
+libname NZWRK netezza server=cs2iwntzp01 database=EDRTLRFRGP1D authdomain="NZ_Auth";
+
+%MEND RRAP_MOR_TNG_AUTOEXEC;
+
+
+%macro rrap_mor_bns_autoexec();
+/*data _null_;abort;run;*/
+
+options nosymbolgen nomlogic mprint compress=yes; 
+%let nzuser=owprdntz;
+%let nzpassword={SAS002}B0E0AA3D417B508E4D50C0CB2ABCF12E;	
+
+%let db2user=owprdsas;
+%let db2password={SAS002}BDE6030F492DC4274D4EB8E507712524;
+
+LIBNAME control BASE "&rrap_dir/params/rrap";
+
+%include "&rrap_dir./macro/rrap/rrap_mortgage_nz_del_dup.sas";
+%include "&rrap_dir./macro/rrap/rrap_mortgage_stat_formats.sas";
+
+%global rrap_dir FRG_DB frg_lib;
+%let FRG_DB=FRG_USER_DATA;
+%let frg_lib=nzuser;
+
+/*%let rrap_dir=/sastemp/rrap_bns;*/
+LIBNAME intmed BASE "&rrap_dir./data/rrap/mortgage/intermediate";
+LIBNAME results BASE "&rrap_dir./data/rrap/mortgage/results";
+
+LIBNAME source BASE "&rrap_dir./data/rrap/mortgage/source";
+libname src         "&rrap_dir./data/rrap/mortgage/source";
+LIBNAME target BASE "&rrap_dir./data/rrap/mortgage/target";
+
+libname NZ netezza server=cs2iwntzp01 database=credit_risk user=&nzuser. password="&nzpassword" bulkunload=yes;
+libname NZUSER netezza server=cs2iwntzp01 database=frg_user_data  bulkunload=yes authdomain="NZ_AUTH"; *user=&nzuser. password="&nzpassword";
+libname NZRRAP netezza server=cs2iwntzp01 database=EDRTLRP1D authdomain="NZ_AUTH";
+
+LIBNAME Owstar DB2  Datasrc=OWSTAR  SCHEMA=OWSTAR  user="&db2user" password="&db2password";
+LIBNAME CB DB2  Datasrc=OWSTAR  SCHEMA=CB user="&db2user" password="&db2password";
+LIBNAME SAS DB2  Datasrc=OWSTAR  SCHEMA=FRG user="&db2user" password="&db2password" readbuff=300;
+libname owdss db2 datasrc=owstar schema=owdss user="&db2user" password="&db2password";
+LIBNAME EDRTLR DB2 DATASRC=DM1P1D SCHEMA=EDRTLR; /*genl_lkp uses this*/
+LIBNAME OWTACT DB2 DATASRC=OWSTAR SCHEMA=OWTACT; 
+/*OWTACT is used for source automation cust_xref*/
+
+%global source_lib target_lib ds acct_key cust_key time_key target_lib2 target_lib3 frg_db cust_key2 time_keyc;
+%let frg_db= FRG_USER_DATA; /*Job found = RRAP_MOR_MODEL_80_STACK_TNG_AND_BNS*/
+
+*       Source data location:;
+%let source_lib=mor;
+%let target_lib=nzuser;
+%let target_lib2=credit_risk;
+%let target_lib3=frg_user_data;
+
+*       Population dataset;
+%let ds=MOR_SAMPLE_DEV;
+
+*       Natural Account Key;
+%let acct_key=mortgage_no;
+
+*       Natural Customer Key;
+%let cust_key=cid;
+
+*       Retail Datamart Customer Key;
+%let cust_key2=cust_base_key;
+
+*       Time dimension;
+%let time_key=time_key;
+%let time_keyc=yymth;
+
+%let from_dt=;
+%let to_dt=;
+
+/***** Set dates for MOR DATA PULL *****/
+%let MOR_DATES='200907' '200904' '200910' '201001' '201004' '201007';
+
+/*Job found = SCRCD_55_LGD_COSTS*/
+%let sqluser=usr_rrap_frg;
+%let passwd="{SAS002}AF7A0E03464A39D9353A5E5D397CD9DA0219E761"; /*1RichmondStW*/
+libname conMO sqlsvr dsn=BASEL_LGD SCHEMA=DBO user= &sqluser password= &passwd readbuff=10000 INSERTBUFF=10000;
+
+/*FOR MODEL SCHEDULES*/
+/*Job found = MODEL_50_LOAD_BRDM_TO_NETEZZA*/
+libname brdm sqlsvr dsn=BSL_IST_BRDM_DR SCHEMA=dbo user= &sqluser password= &passwd readbuff=10000 INSERTBUFF=10000; 
+/*PROD*/
+/*libname brdm sqlsvr dsn=BSL_BRDM_DR SCHEMA=dbo user= &_userid password= &_pwd_sql readbuff=10000 INSERTBUFF=10000; */
+
+/*Compensation Control*/
+%global threshold; %let threshold=0.0001;
+libname sql_dms sqlsvr dsn=dms schema=dbo authdomain="SQLSRV_Auth";
+libname NZWRK netezza server=cs2iwntzp01 database=EDRTLRFRGP1D authdomain="NZ_Auth";
+
+%mend rrap_mor_bns_autoexec;
+
+%MACRO rrap_autoexec(RRAPEnv=);
+
+/*data _null_;abort;run;*/
+
+/*-----------------------------------------------------------------------------------------------
+Maintenance Log:
+-------------------------------------------------------------------------------------------------
+THIS MACRO IS USED IN ALL REVOLVING CREDIT SAS PROGRAMS AND DIS BASED DEPLOYED JOBS.
+THIS MACRO INITIALIZES PARAMETERS AND LIBRARIES
+-------------------------------------------------------------------------------------------------*/
+LIBNAME control BASE "&rrap_dir/params/rrap";
+
+%IF &RRAPEnv =
+%THEN %LET RRAPEnv = REVOLVING_CREDIT;
+
+%global threshold;
+%let threshold=0.0001;
+/* global SAS session options */
+OPTIONS COMPRESS=Y STIMER THREADS DBSLICEPARM=(ALL,10);
+/*OPTIONS NOTES NOSOURCE NOSYMBOLGEN NOMPRINT NOMLOGIC;*/
+%GLOBAL DB2PASSTHRU;
+%GLOBAL DBSERVER;
+%GLOBAL DBNAME;
+%GLOBAL DBSCHEMA;
+%GLOBAL DBUSER;
+%GLOBAL DBPASS;
+%GLOBAL USER_ID;
+%GLOBAL NETE_PASS_THROUGH;
+%GLOBAL PARMFILE;
+%GLOBAL PARMFILE_PATH;
+%GLOBAL DB;
+%GLOBAL DBSCHEMA1;
+%GLOBAL MASTER_TABLE;
+%GLOBAL MTH_TM_ID;
+%GLOBAL MTH_END_DT;
+%GLOBAL YEARMONTH;
+%GLOBAL INPATH;
+%GLOBAL OUTPATH;
+%GLOBAL DPATH;
+%GLOBAL LIB;
+%GLOBAL SESSIONTIME;
+%GLOBAL INPUT00;
+%GLOBAL TGT00;
+%GLOBAL Processing_Month_Time_ID;
+%GLOBAL net_serv net_db net_sche net_user net_pwd dsnn schma usr passw;
+%GLOBAL REPORT_PATH PATH PATH2 PATHLA PATH2LA;
+%IF %INDEX(%UPCASE(&RRAPEnv), REVOLVING_CREDIT) %THEN %DO;
+
+%LET net_serv = cs2iwntzp01;
+%LET net_db =  EDRTLRP1D;
+%LET net_wrk = EDRTLRFRGP1D; /*this database used for control table;*/
+%LET net_sche = GDAW;
+%LET net_user= owprdntz; 
+%LET net_pwd = "{SAS002}B0E0AA3D417B508E4D50C0CB2ABCF12E";  
+	
+LIBNAME NETCON NETEZZA SERVER=&net_serv DATABASE=&net_db USER=&net_user PASSWORD=&net_pwd;
+LIBNAME NZRRAP NETEZZA SERVER=&net_serv DATABASE=&net_db USER=&net_user PASSWORD=&net_pwd;
+/*NZRRAP added since the control table uses it*/
+	
+%LET NETE_PASS_THROUGH=SERVER=&net_serv DATABASE=&net_db USER=&net_user PASSWORD=&net_pwd;
+LIBNAME NZUSER NETEZZA SERVER=&net_serv DATABASE=&net_wrk USER=&net_user PASSWORD=&net_pwd;
+LIBNAME PRG_DATA "&rrap_dir./data/rrap/reporting";
+%LET PARMFILE_PATH = "&rrap_dir./params/rrap/rrap_batch.sasprm";
+libname rrap_lib "&rrap_dir./data/rrap";
+	
+/*PARAMETERS BELOW ARE USED IN SAS REPORTING (NCR, ECAP, CCAR)*/
+%LET DB2PASSTHRU=OWSTAR;  
+%LET DBNAME=DM1P1D;
+%LET DB=&DBNAME;
+%LET LIB=DRAPT;
+%LET DBSCHEMA=EDRRAPT;
+%LET DBSCHEMA1=EDRTLRT;
+%LET MASTER_TABLE=BASEL_CUST_ACCT_RLTNP_SNAPSHOT; /*changed after batch1.1 didnt extract the latest month*/
+%LET SESSIONTIME=%SYSFUNC(DATETIME(),BEST18.); /*CURRENT TIMESTAMP FROM SAS */
+%LET DPATH=&rrap_dir./data/rrap/reporting;
+%LET INPUT00=EDRRAPT.BASEL_ANALYTCL_BL_INSTRMNT_FACT;
+%LET TGT00=EDRRAPT.BASEL_ANALYTCL_BL_INSTRMNT_FACT;
+%LET DIM_NOT= ;
+LIBNAME &LIB. "&DPATH.";
+LIBNAME LDD	DB2 Database=&db schema=EDRRAPT;
+LIBNAME DDB2CON DB2 DATABASE="&DBNAME" SCHEMA="&DBSCHEMA";
+LIBNAME &DB.    DB2 DATABASE="&DBNAME" SCHEMA="&DBSCHEMA";
+LIBNAME EDRRAPT DB2 DATABASE="&DBNAME" SCHEMA="&DBSCHEMA";
+LIBNAME EDRTLRT DB2 DATABASE="&DBNAME" SCHEMA="&DBSCHEMA1";
+LIBNAME INPATH "&DPATH.";
+LIBNAME OUTFILE "&DPATH.";
+%LET INPATH=INPATH;
+
+/*DB2 LIBRARIES INITIALIZED*/
+/*ONLY DEP TXN AND POSTN SUM FACT IN REVOLVING CREDIT USE THIS PASSTHROUGH/OWSTAR*/
+LIBNAME OWSTAR DB2 DATASRC=&DB2PASSTHRU SCHEMA=OWSTAR;
+
+/*FETCH THE LATEST PROCESSING MONTH FROM THE MASTER TABLE AND LOAD INTO A VARIABLE MTH_TM_ID*/
+
+/*%let mth_tm_id=16236;*/
+PROC SQL NOPRINT;
+SELECT MAX(MTH_TM_ID) INTO :MTH_TM_ID FROM NETCON.&MASTER_TABLE.;
+SELECT TM_LVL_END_DT INTO :MTH_END_DT FROM NETCON.TM_DIM WHERE TM_ID = &MTH_TM_ID.;
+QUIT;
+
+%LET Processing_Month_Time_ID = &MTH_TM_ID.;
+
+/*FETCH MORE TIME PERIOD DETAILS*/
+proc sql noprint;
+connect to db2 as dbcon (database=&dbname.);
+	CREATE table _temp_yearmonth as 
+	select * from connection to dbcon (
+		select clndr_yr, tm_yr_seq_num, '00' as charmonth, '000000' as yearmonth from 
+EDRTLRT.TM_DIM where TM_ID = &MTH_TM_ID.;
+	);
+quit;
+
+/*CONVERT THE INTEGER VALUES TO CHARACTER AS NEEDED*/
+data _temp_yearmonth;
+set _temp_yearmonth;
+if tm_yr_seq_num < 10 then do;
+	charmonth='0'||put(tm_yr_seq_num,1.);
+end;
+else do;
+charmonth=tm_yr_seq_num;
+end;
+	yearmonth=clndr_yr||charmonth;
+	format yearmonth $char6.;
+run;
+
+/*Save the string YYYYMM for the latest MTH_TM_ID fetched from TM_DIM into a variable*/
+proc sql noprint;
+select yearmonth into :yearmonth from _temp_yearmonth;
+quit;
+
+%PUT >>> MTH_TM_ID IS &MTH_TM_ID.;
+%PUT >>> MTH_END_DT IS &MTH_END_DT.;
+%PUT >>> YEARMONTH IS &YEARMONTH.;
+%PUT >>> DB= &DB. and Processing_Month_Time_ID = &Processing_Month_Time_Id;
+
+/*INITIALIZING SQL SERVER LIBRARIES*/
+%let dsnn=BSL_BRDM_DR;
+%let schma=brdm_dr;
+%let usr=usr_rrap;
+%let passw={SAS002}160E9F27213F11B320B8B6EA10D19624;
+libname IST sqlsvr dsn=&dsnn user=&usr password= "&passw.";
+
+%END;
+
+%IF %INDEX(%UPCASE(&RRAPEnv), BASELDB2) %THEN %DO;      
+
+%PUT NOTHING TO DECLARE;
+%END;
+
+%MEND rrap_autoexec;
+
+%macro report_validation;
+%GLOBAL MONTHYEAR PREV_MONTHYEAR;
+/*CURRENT MONTHYEAR*/
+proc sql noprint;
+CREATE table _temp_monthyear as 
+select clndr_yr, tm_yr_seq_num, '00' as charmonth, '000000' as monthyear from EDRTLRT.TM_DIM where TM_ID = &MTH_TM_ID;
+quit;
+/*Convert the integer values to char values as needed*/
+data _temp_monthyear;
+set _temp_monthyear;
+if tm_yr_seq_num < 10 then do;
+	charmonth='0'||put(tm_yr_seq_num,1.);
+end;
+else do;
+charmonth=tm_yr_seq_num;
+end;
+
+monthyear=charmonth||clndr_yr;
+	format monthyear $char6.;
+run;
+/*Save the string YYYYMM for the latest MTH_TM_ID fetched from TM_DIM into a variable*/
+proc sql noprint;
+select monthyear into :monthyear from _temp_monthyear;
+quit;
+
+%PUT MONTHYEAR IS &MONTHYEAR;
+
+/*PREVIOUS MONTHYEAR*/
+proc sql noprint;
+CREATE table _temp_prev_monthyear as 
+select clndr_yr, tm_yr_seq_num, '00' as charmonth, '000000' as prev_monthyear from EDRTLRT.TM_DIM where TM_ID = &MTH_TM_ID-40;
+quit;
+/*Convert the integer values to char values as needed*/
+data _temp_prev_monthyear;
+set _temp_prev_monthyear;
+if tm_yr_seq_num < 10 then do;
+	charmonth='0'||put(tm_yr_seq_num,1.);
+end;
+else do;
+charmonth=tm_yr_seq_num;
+end;
+
+prev_monthyear=charmonth||clndr_yr;
+prev_yearmonth=clndr_yr||charmonth;
+	format prev_monthyear $char6.;
+	format prev_yearmonth $char6.;
+run;
+/*Save the string YYYYMM for the latest MTH_TM_ID fetched from TM_DIM into a variable*/
+proc sql noprint;
+select prev_monthyear into :prev_monthyear from _temp_prev_monthyear;
+select prev_yearmonth into :prev_yearmonth from _temp_prev_monthyear;
+quit;
+
+%PUT prev_MONTHYEAR IS &prev_MONTHYEAR;
+%PUT prev_yearmonth is &prev_yearmonth;
+
+%let time_id=&MTH_TM_ID;
+
+%LET REPORT_PATH=&rrap_dir./flat_files/rrap; /*used for ncr validation report*/
+%let path="&OUTPATH./rk/outgoing/AE_BE_&MONTHYEAR..DAT"; /*used for ncr validation report*/
+%let path2="&OUTPATH./rk/outgoing/AE_BD_&MONTHYEAR..DAT"; /*used for ncr validation report*/
+%let pathla="&OUTPATH./rk/outgoing/history/&prev_yearmonth/AE_BE_&PREV_MONTHYEAR..DAT"; /*used for ncr validation report*/
+%let path2la="&OUTPATH./rk/outgoing/history/&prev_yearmonth/AE_BD_&PREV_MONTHYEAR..DAT"; /*used for ncr validation report*/
+
+%MEND report_validation;

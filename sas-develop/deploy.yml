@@ -1,0 +1,25 @@
+# Properties for CiaD Jenkins deploy pipelines
+
+deployScriptFile: deploy.sh
+scriptCommand: ${serverName} ${deployArtifact}
+
+devServers:
+  -
+    name: DEV1
+    address: cs2iw407.bns
+    deployer:  s6036538
+    deployLocation: /u/s6036538
+
+stagingServers:
+  -
+    name: QAT1
+    address: cs2iw407.bns
+    deployer: ciad_b9xfu
+    deployLocation: /u/s6036538
+ 
+prodServers:
+  -
+    name: PROD1
+    address: cs2iw503.bns 
+    deployer: ciad_b9xfp
+    deployLocation: /app/ciad_b9xfp

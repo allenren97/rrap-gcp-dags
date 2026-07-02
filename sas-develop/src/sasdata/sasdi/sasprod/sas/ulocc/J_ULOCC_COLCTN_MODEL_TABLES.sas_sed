@@ -1,0 +1,39 @@
+114s/^/ \/\* /; 114s/$/ \*\//;
+114a\
+ libname crdm  db2 dsn=DM1DBT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  schema=EDRTLR readbuff=30000 ;
+115s/^/ \/\* /; 115s/$/ \*\//;
+115a\
+ libname crdm_t  db2 dsn=DM1DBT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  schema=EDRTLRT readbuff=30000 ;
+116s/^/ \/\* /; 116s/$/ \*\//;
+116a\
+ libname p_edw db2 schema=EDEDW user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  datasrc=DM1DBT dbconinit="SET CURRENT DEGREE='ANY'" INSERT_SQL=YES readbuff=10000 INSERTBUFF=10000 ;
+117s/^/ \/\* /; 117s/$/ \*\//;
+117a\
+ libname p_rds db2 schema=EDRDS user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  datasrc=DM1DBT dbconinit="SET CURRENT DEGREE='ANY'" INSERT_SQL=YES readbuff=10000 INSERTBUFF=10000 ;
+118s/^/ \/\* /; 118s/$/ \*\//;
+118a\
+ libname p_edt db2 schema=EDEDT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  datasrc=OWSTAR dbconinit="SET CURRENT DEGREE='ANY'" INSERT_SQL=YES readbuff=10000 INSERTBUFF=10000 ;
+121s/^/ \/\* /; 121s/$/ \*\//;
+121a\
+ libname SAS db2 schema=EDRTLRMDT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  datasrc=DM1P1D ;
+124s/^/ \/\* /; 124s/$/ \*\//;
+124a\
+ libname d_cr_tb db2 dsn=DM1P1D user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  schema=EDRTLRT readbuff=30000 ;
+125s/^/ \/\* /; 125s/$/ \*\//;
+125a\
+ libname d_cr_vw  db2 dsn=DM1P1D user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  schema=EDRTLR readbuff=30000 ;
+620s/^/ \/\* /; 620s/$/ \*\//;
+620a\
+ 	connect to db2 (dsn=DM1DBT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS) ) ;
+1324s/^/ \/\* /; 1324s/$/ \*\//;
+1324a\
+ 	connect to db2 (dsn=DM1DBT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS) ) ;
+1350s/^/ \/\* /; 1350s/$/ \*\//;
+1350a\
+ connect to db2(database=dm1dbt user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS) ) ;
+1441s/^/ \/\* /; 1441s/$/ \*\//;
+1441a\
+ 	connect to db2 (dsn=OWSTAR user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS) ) ;
+1506s/^/ \/\* /; 1506s/$/ \*\//;
+1506a\
+ 	connect to db2 (dsn=OWSTAR user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS) ) ;

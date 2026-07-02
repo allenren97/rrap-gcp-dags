@@ -1,0 +1,23 @@
+﻿Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,INSURANCE,BULK_IND,TOTAL_BALANCE,MONTH_DEF_SINCE_LAST_DEF,CURRENT_BALANCE,TOTAL_SUSPENSE,FULL_PAID_OFF_F,PIT_STATUS_CROSS_DEFAULT_ORIG,Output
+Special Segment,,,,,,,<=0,=0,Y,,98
+Special Segment,,<0,,,,,,,,is None,98
+Special Segment,>=0,,,,,,,,,is None,98
+Special Segment,,,,,,,,,,is None,98
+"Total_Balance^2 <= 5,000 Month_Def < 36",>0,,,,<=5000,<36,,,,,13
+"Total_Balance^2 <= 5,000 Month_Def < 36",,<=0,,,<=5000,<36,,,,,13
+"Total_Balance^2 <= 5,000 Month_Def < 36",,,,,<=5000,<36,,,,,13
+Month_Def >=36,,<0,,,,>=36,,,,,14
+Month_Def >=36,>=0,,,,,>=36,,,,,14
+Month_Def >=36,,,,,,>=36,,,,,14
+"<=814 AND Insurance_Ind = ""Uninsured""",,<=814,Uninsured,,,,,,,,1
+"(814, 831] AND Insurance_Ind = ""Uninsured""",>814,<=831,Uninsured,,,,,,,,2
+"(831, 840] AND Insurance_Ind = ""Uninsured""",>831,<840,Uninsured,,,,,,,,3
+">=840 AND Insurance_Ind = ""Uninsured""",>=840,,Uninsured,,,,,,,,4
+"<=814 AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""N""",,<=814,Insured,N,,,,,,,5
+"(814, 831] AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""N""",>814,<=831,Insured,N,,,,,,,6
+"(831, 840] AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""N""",>831,<840,Insured,N,,,,,,,7
+">=840 AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""N""",>=840,,Insured,N,,,,,,,8
+"<=814 AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""Y""",,<=814,Insured,Y,,,,,,,9
+"(814, 831] AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""Y""",>814,<=831,Insured,Y,,,,,,,10
+"(831, 840] AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""Y""",>831,<840,Insured,Y,,,,,,,11
+">=840 AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""Y""",>=840,,Insured,Y,,,,,,,12

@@ -1,0 +1,3 @@
+# The second line is the email list for normal report; the third line is the email list for normal report above SI threshold
+"sujeetha.selvaraj@scotiabank.com" "larry.chen@scotiabank.com" "Evan.Kinsman@scotiabank.com" "edwsupport@scotiabank.com"
+"sujeetha.selvaraj@scotiabank.com" "larry.chen@scotiabank.com" "Evan.Kinsman@scotiabank.com" "edwsupport@scotiabank.com"

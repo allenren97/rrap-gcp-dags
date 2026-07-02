@@ -1,0 +1,3 @@
+# The second line is the email list for the to list; the third line is the email list for CC list
+"RMA-Dev-Support@scotiabank.com" "RMAModelCompliance@scotiabank.com" "RMA-Quality@scotiabank.com" "zulfiqar.hyder@scotiabank.com"  "Carol.Gardner@scotiabank.com" "ninad.deshpande@scotiabank.com" "salman.malik@scotiabank.com" "ahmed.assaad@scotiabank.com" "yin.xu@scotiabank.com" "vita.kornieva@scotiabank.com"
+"edwsupport@scotiabank.com" "GRT-Model-Support@scotiabank.com"

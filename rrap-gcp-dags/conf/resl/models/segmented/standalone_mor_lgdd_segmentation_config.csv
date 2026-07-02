@@ -1,0 +1,14 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,HGST_DLQNT_DAY_MTG_MAX24M_ACCT,MODEL_EXCL_F,WRITTEN_OUT_F,TOTAL_BALANCE,STEP_STANDALONE_MONTH_DEF_SINCE_LAST_DEF,INSURANCE_F,Output
+Special Segment,,,,Y,,,,,98
+Special Segment,,,,,Y,,,,98
+Special Segment,,,,,,<=0,,,98
+STEP_STANDALONE_MONTH_DEF_SINCE_LAST_DEF > 36,,,,,,,>36,,99
+Uninsured and <= 273.5 or Missing/NULL,,,<=273.5 ,,,,,UNINSURED,1
+Uninsured and <=273.5 or Missing/NULL,,,IS NONE,,,,,UNINSURED,1
+Uninsured and > 273.5,,,>273.5,,,,,UNINSURED,2
+Insured and <= 273.5 or Missing/NULL,,,<=273.5 ,,,,,INSURED,3
+Insured and <= 273.5 or Missing/NULL,,,IS NONE,,,,,INSURED,3
+Insured and > 273.5,,,>273.5,,,,,INSURED,4
+Bulk and <= 273.5 or Missing/NULL,,,<=273.5 ,,,,,BULK,5
+Bulk and <= 273.5 or Missing/NULL,,,IS NONE,,,,,BULK,5
+Bulk and > 273.5,,,>273.5,,,,,BULK,6

@@ -1,0 +1,29 @@
+deployScriptFile: deploy.sh
+scriptCommand: ${serverName} ${deployArtifact} ${deployLocation}
+
+#Servers for DEV environment
+devServers:
+  - name: IST
+    address: lvappi05033.cloud.bns
+    deployer: rrapmso
+    deployLocation: /bns/rrap/.deploy/rrap-gcp-dags
+
+#Servers for UAT environment
+stagingServers:
+  - name: UAT
+    address: lvappi05034.cloud.bns
+    deployer: rrapmso
+    deployLocation: /bns/rrap/.deploy/rrap-gcp-dags
+
+#Servers for PROD environment
+prodServers:
+ - name: PROD
+   address: lvappp04495.cloud.bns
+   deployer: rrapmso
+   deployLocation: /bns/rrap/.deploy/rrap-gcp-dags
+
+ - name: BCP
+   address: lvappp04496.cloud.bns
+   deployer: rrapmso
+   deployLocation: /bns/rrap/.deploy/rrap-gcp-dags
+

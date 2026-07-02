@@ -1,0 +1,19 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_STEP,MODEL_EXCL_F,WRITTEN_OUT_F,OS_BAL_AMT,CR_LMT_AMT,Output
+Special Segment,>=0,,,Y,,,,98
+Special Segment,,<0,,Y,,,,98
+Special Segment,,,,Y,,,,98
+Special Segment,>=0,,,,Y,,,98
+Special Segment,,<0,,,Y,,,98
+Special Segment,,,,,Y,,,98
+Special Segment,>=0,,,,,<=0,<=0,98
+Special Segment,,<0,,,,<=0,<=0,98
+Special Segment,,,,,,<=0,<=0,98
+Defaulted and Charged-off PIT Status post-exclusion criteria,>=0,,CHG,,,,,99
+Defaulted and Charged-off PIT Status post-exclusion criteria,,<0,CHG,,,,,99
+Defaulted and Charged-off PIT Status post-exclusion criteria,,,CHG,,,,,99
+Defaulted and Charged-off PIT Status post-exclusion criteria,>=0,,DEF,,,,,99
+Defaulted and Charged-off PIT Status post-exclusion criteria,,<0,DEF,,,,,99
+Defaulted and Charged-off PIT Status post-exclusion criteria,,,DEF,,,,,99
+Total Score <=971,,<=971,,,,,,3
+Total Score > 971 AND Total Score <= 1006,>971,<=1006 ,,,,,,2
+Total Score > 1006,>1006,,,,,,,1

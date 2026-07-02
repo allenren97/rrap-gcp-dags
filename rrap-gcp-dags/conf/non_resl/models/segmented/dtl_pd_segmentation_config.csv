@@ -1,0 +1,8 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_CROSS_DEFAULT_ORIG,MODEL_EXCL_F_V2,TREATMENT_F,Output
+Def,>=0,,DEF,,,99
+Small Balances,,,CUR,Y,A,7
+>=716.5,>=716.5,,,,,1
+"[690.5, 716.5) ",>=690.5,<716.5,,,,2
+"[664.5, 690.5) ",>=664.5,<690.5,,,,3
+"[628.5, 664.5) ",>=628.5,<664.5,,,,4
+<628.5 ,,<628.5,,,,5

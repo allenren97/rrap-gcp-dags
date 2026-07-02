@@ -1,0 +1,13 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,MODEL_EXCL_F,WRITTEN_OUT_F,OS_BAL_AMT,CR_LMT_AMT,PIT_STATUS_STEP,STEP_INSURANCE,Output
+Special Segment,,,,Y,,,,,98
+Special Segment,,,Y,,,,,,98
+Special Segment,,,,,<=0,<=0,,,98
+Uninsured and Total Score <=837,,<=837,,,,,,UNINSURED,1
+Uninsured and Total Score <= 861 and Total Score > 837,>837,<=861,,,,,,UNINSURED,2
+Uninsured and Total Score > 861,>861,,,,,,,UNINSURED,3
+Insured and Total Score <=837,,<=837,,,,,,INSURED,4
+Insured and Total Score <= 861 and Total Score > 837,>837,<=861,,,,,,INSURED,5
+Insured and Total Score > 861,>861,,,,,,,INSURED,6
+Mix and Total Score <=837,,<=837,,,,,,MIX,7
+Mix and Total Score <= 861 and Total Score > 837,>837,<=861,,,,,,MIX,8
+Mix and Total Score > 861,>861,,,,,,,MIX,9

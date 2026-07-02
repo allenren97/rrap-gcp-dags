@@ -1,0 +1,5 @@
+ne is the email list for the to list; the third line is the email list for CC list
+"frank.russo@scotiabank.com" "zulfiqar.hyder@scotiabank.com" "ninad.deshpande@scotiabank.com" "Carol.Gardner@scotiabank.com" "Sandeep.Kumar@scotiabank.com" "Chris.Broley@scotiabank.com" "ahmed.assaad@scotiabank.com" "liliya.kuznetsova@scotiabank.com" "Nelly.Selitser@scotiabank.com" "wanda.kemp@scotiabank.com"
+"edwsupport@scotiabank.com" "Leonid.Kushnir@scotiabank.com" "rrmss_support@scotiabank.com" "nimrat.grewal@scotiabank.com" "Derek.Landau@scotiabank.com" "prashan.vethanayagam@scotiabank.com" "michelle.kao@scotiabank.com"
+
+

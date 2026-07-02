@@ -1,0 +1,8 @@
+-- URATE feature definition
+CREATE TABLE IF NOT EXISTS features.URATE (
+    MORT_NUM BIGINT,
+    OBSN_DT DATE NOT NULL,
+    URATE DECIMAL(18,4)
+);
+-- Set partitions 
+ALTER TABLE features.URATE SET PARTITIONED BY (OBSN_DT);

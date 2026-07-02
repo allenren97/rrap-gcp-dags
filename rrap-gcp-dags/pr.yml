@@ -1,0 +1,9 @@
+build:
+  template: python:generic
+  substitutions:
+    _SONAR_SCAN_STRATEGY: SKIP
+    _CHECKMARX_SCAN_STRATEGY: SKIP
+    _BLACKDUCK_SCAN_STRATEGY: SKIP
+    _VERSION_STRATEGY: DEV_TEAM
+    _IS_PUBLISHING_ARTIFACT: 0
+

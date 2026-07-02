@@ -1,0 +1,14 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,MODEL_EXCL_F,WRITTEN_OUT_F,OS_BAL_AMT,CR_LMT_AMT,PIT_STATUS_STEP,STEP_MONTH_DEF_SINCE_LAST_DEF,STEP_INSURANCE,Output
+Special Segment,,,,Y,,,DEF,,,98
+Special Segment,,,Y,,,,DEF,,,98
+Special Segment,,,,,<=0,<=0,DEF,,,98
+STEP_MONTH_DEF_SINCE_LAST_DEF > 36,,,,,,,DEF,>36,,99
+Uninsured and Total Score <=696,,<=696,,,,,,,UNINSURED,1
+Uninsured and Total Score <=715 and Total Score > 696,>696,<=715,,,,,,,UNINSURED,2
+Uninsured and Total Score >715,>715,,,,,,,,UNINSURED,3
+Insured and Total Score <=696,,<=696,,,,,,,INSURED,4
+Insured and Total Score <=715 and Total Score > 696,>696,<=715,,,,,,,INSURED,5
+Insured and Total Score >715,>715,,,,,,,,INSURED,6
+Mix and Total Score <=696,,<=696,,,,,,,MIX,7
+Mix and Total Score <=715 and Total Score > 696,>696,<=715,,,,,,,MIX,8
+Mix and Total Score >715,>715,,,,,,,,MIX,9

@@ -1,0 +1,12 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_CROSS_DEFAULT_ORIG,MODEL_EXCL_F,TREATMENT_F,PRD_ID,IND_DELQ_SUM24M,AT29_MAX6M,OS_BAL_AMT,IND_JOINT,Output
+Special Segments,,,CUR,Y,A,"IN ('S01', 'S02', 'S03', 'S04', 'S06', 'S07')",,,<1000,,8
+Special Segments,,,CUR,N,A,"IN ('S01', 'S02', 'S03', 'S04', 'S06', 'S07')",,,<1000,,8
+"S01,S02,S03,S04,S06 AND OS_BAL >= 1000",,,CUR,,,"IN ('S01', 'S02', 'S03', 'S04', 'S06')",,,>=1000,,1
+S07 Non-Joint DELQ>8 AND OS_BAL >= 1000,,,CUR,,,S07,>8,,>=1000,0,1
+S07 Joint AND OS_BAL >= 1000,,,CUR,,,S07,,,>=1000,1,2
+"S07 Non-Joint DELQ (2, 8]  AND AT29<=4 AND OS_BAL >= 1000",,,CUR,,,S07,"IN ( '3', '4', '5', '6', '7', '8')",<=4,>=1000,0,2
+"S07 Non-Joint DELQ(1,2) AND AT29>4 AND OS_BAL >= 1000 ",,,CUR,,,S07,"IN ('1', '2')",,>=1000,0,3
+"S07 Non-Joint DELQ(3,4,5,6,7,8) AND AT29>4 AND OS_BAL >= 1000",,,CUR,,,S07,"IN ('3', '4', '5', '6', '7', '8')",>4,>=1000,0,3
+S07 Non-Joint DELQ=0 AND OS_BAL >= 1000,,,CUR,,,S07,0,,>=1000,0,4
+S05,,,CUR,,,S05,,,,,7
+S08,,,CUR,,,S08,,,,,7

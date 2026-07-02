@@ -1,0 +1,24 @@
+129s/^/ \/\* /; 129s/$/ \*\//;
+129a\
+ LIBNAME DB2ULCED DB2  Datasrc=DM1P1D user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)   SCHEMA=EDRTLRT  ;
+622s/^/ \/\* /; 622s/$/ \*\//;
+622a\
+          CONNECT USING INTULOCC AS DB2CON; user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  ;
+1228s/^/ \/\* /; 1228s/$/ \*\//;
+1228a\
+          LIBNAME DB2ULCIN DB2  Datasrc=INTGRP1D user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)   SCHEMA=INARRGT  ;
+3208s/^/ \/\* /; 3208s/$/ \*\//;
+3208a\
+          LIBNAME DB2ULCED DB2  Datasrc=DM1P1D user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)   SCHEMA=EDRTLRT  ;
+3430s/^/ \/\* /; 3430s/$/ \*\//;
+3430a\
+                data DB2ULCED.ULOC_REVLVNG_CR_DLY_SNAPSHOT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  ;
+3761s/^/ \/\* /; 3761s/$/ \*\//;
+3761a\
+                      connect to DB2 user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  ;
+3797s/^/ \/\* /; 3797s/$/ \*\//;
+3797a\
+                   connect to DB2 user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  ;
+3821s/^/ \/\* /; 3821s/$/ \*\//;
+3821a\
+             proc append base = DB2ULCED.ULOC_REVLVNG_CR_DLY_SNAPSHOT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS) (  BULKLOAD = YE ;

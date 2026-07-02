@@ -1,0 +1,8 @@
+-- RATIO feature definition
+CREATE TABLE IF NOT EXISTS features.RATIO (
+    MORT_NUM BIGINT,
+    OBSN_DT DATE NOT NULL,
+    RATIO DECIMAL(18,4)
+);
+-- Set partitions 
+ALTER TABLE features.RATIO SET PARTITIONED BY (OBSN_DT);

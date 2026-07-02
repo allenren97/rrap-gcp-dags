@@ -1,0 +1,5 @@
+﻿Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,MODEL_EXCL_F,Written_Out_F,CR_LMT_AMT,TOT_NEW_BAL_AMT,Output
+Special Segment,,,Y,,,,98
+Special Segment,,,,Y,,,98
+Special Segment,,,,,<=0,<=0,98
+Else,,,,,,,1

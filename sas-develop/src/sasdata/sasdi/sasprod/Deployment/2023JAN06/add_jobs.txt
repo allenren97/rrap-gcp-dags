@@ -1,0 +1,15 @@
+$JOBS
+IW103#OW_FT_RRII_CCAR_ACAP_PREPARE_JOFILES
+ SCRIPTNAME "^PSCRIPTS^rrap/ow_rrap_prepare_ccar_acap_for_sftpjo.ksh ^OW_FTP^/cmf/outgoing/CCAR_ACAP $OWFTP/cmf/outgoing/jofiles/CCAR_ACAP"
+ STREAMLOGON owprd
+ DESCRIPTION "Prepare Combined CCAR-ACAP Extracts for SFTPJO"
+ TASKTYPE UNIX
+ RECOVERY STOP
+
+IW103#OW_FT_RRII_CCAR_ACAP_CN_SFTP_TO_MAILMNGR
+ SCRIPTNAME "^PSCRIPTS^ow_common_sftp.ksh /owprd/data ow_common_sftp_from_edw_to_mailmanager_rrap_ccar_acap.txt"
+ STREAMLOGON owprdftp
+ DESCRIPTION "Calls Common SFTP to transfer Combined CCAR-ACAP Extracts thru SFTPJO"
+ TASKTYPE UNIX
+ RECOVERY STOP
+

@@ -1,0 +1,4 @@
+ne is the email list for the to list; the third line is the email list for CC list
+"edwsupport@scotiabank.com"
+"edwsupport@scotiabank.com"
+

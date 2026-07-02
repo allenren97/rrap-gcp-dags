@@ -1,0 +1,13 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,MTG_PROVIDER,MONTH_DEF_SINCE_LAST_DEF,BALANCE_INTEREST,Output
+Accounts defaulted > 24 months,>=0,,,>23,,11
+Accounts defaulted > 24 months,,<0,,>23,,11
+Accounts defaulted > 24 months,,,,>23,,11
+Special Segment,>=0,,,,<5000,10
+Special Segment,,<0,,,<5000,10
+Special Segment,,,,,<5000,10
+Special Segment,>=0,,RES,,,10
+Special Segment,,<0,RES,,,10
+Special Segment,,,RES,,,10
+STATUS='DEF',>=0,,,,,1
+STATUS='DEF',,<0,,,,1
+STATUS='DEF',,,,,,1

@@ -1,0 +1,19 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_ACCOUNT,MODEL_EXCL_F,WRITTEN_OUT_F,CR_LMT_AMT,TOT_NEW_BAL_AMT,Output
+Special Segment,>=0,,,Y,,,,98
+Special Segment,,<0,,Y,,,,98
+Special Segment,,,,Y,,,,98
+Special Segment,>=0,,,,Y,,,98
+Special Segment,,<0,,,Y,,,98
+Special Segment,,,,,Y,,,98
+Special Segment,>=0,,,,,<=0,<=0,98
+Special Segment,,<0,,,,<=0,<=0,98
+Special Segment,,,,,,<=0,<=0,98
+Defaulted and Charged-off PIT Status post-exclusion criteria,>=0,,CHG,,,,,99
+Defaulted and Charged-off PIT Status post-exclusion criteria,,<0,CHG,,,,,99
+Defaulted and Charged-off PIT Status post-exclusion criteria,,,CHG,,,,,99
+Defaulted and Charged-off PIT Status post-exclusion criteria,>=0,,DEF,,,,,99
+Defaulted and Charged-off PIT Status post-exclusion criteria,,<0,DEF,,,,,99
+Defaulted and Charged-off PIT Status post-exclusion criteria,,,DEF,,,,,99
+All Standalone HELOC EAD accounts that are Current (non-excluded accounts),>=0,,CUR,,,,,1
+All Standalone HELOC EAD accounts that are Current (non-excluded accounts),,<0,CUR,,,,,1
+All Standalone HELOC EAD accounts that are Current (non-excluded accounts),,,CUR,,,,,1

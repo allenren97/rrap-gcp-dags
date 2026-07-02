@@ -1,0 +1,7 @@
+"PRD_SYS_CD","SRC_PRD_CD","SRC_SUB_PRD_CD","EFF_FROM_YR_MTH","BILL_CD_CHAR","EFF_TO_YR_MTH","BASEL_PRD_CD","BASEL_PRD_DESC","PRD_DESC","LTV_TP_CD","SML_BUS_F","CONSM_SCORECRD_EXCLSN_F","CONSM_PRD_TREATMNT_CD","CRNT_F","INSRT_PROCESS_TMSTMP","UPDT_PROCESS_TMSTMP"
+KS   ,SSL       ,SP        ,"200001",A,"999912",SL A      ,Student Loan - Revolving,Scotia Professional Student Plan,LOC       ,N,Y,A         ,Y,2014-07-16-12.12.07.000000,2014-07-16-12.12.07.000000
+KS   ,SSL       ,LN        ,"200001",A,"999912",SL A      ,Student Loan - Revolving,Scotia Student Loan,LOC       ,N,Y,A         ,Y,2014-07-16-12.12.07.000000,2014-07-16-12.12.07.000000
+KS   ,SSL       ,LI        ,"200001",B,"999912",SL B      ,Student Loan  - Term,Scotia Line (including Scotia Student Line),LOC       ,N,Y,A         ,Y,2014-07-16-12.12.07.000000,2014-07-16-12.12.07.000000
+KS   ,SSL       ,LI        ,"200001",A,"999912",SL A      ,Student Loan - Revolving,Scotia Line (including Scotia Student Line),LOC       ,N,Y,A         ,Y,2014-07-16-12.12.07.000000,2014-07-16-12.12.07.000000
+KS   ,SSL       ,LN        ,"200001",B,"999912",SL B      ,Student Loan  - Term,Scotia Student Loan,LOC       ,N,Y,A         ,Y,2014-07-16-12.12.07.000000,2014-07-16-12.12.07.000000
+KS   ,SSL       ,SP        ,"200001",B,"999912",SL B      ,Student Loan  - Term,Scotia Professional Student Plan,LOC       ,N,Y,A         ,Y,2014-07-16-12.12.07.000000,2014-07-16-12.12.07.000000

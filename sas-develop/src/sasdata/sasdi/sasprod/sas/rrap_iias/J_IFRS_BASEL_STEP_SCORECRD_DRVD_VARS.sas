@@ -1,0 +1,390 @@
+/**************************************************************************************** 
+* INFA Job Name			:DM_RRAP_Load_BASEL_STEP_SCORECRD_DRVD_VARS						*
+* SAS Job Name			:J_RRII_KS10_2111_DM_RRAP_BASEL_STEP_SCORECRD_DRVD_VARS			* 
+* Description			:Updated KPI AVG_12_MTH_STEP_WORST_DAY_REVLVNG_CR_DLQNT_DAY_CNT	*
+* Source Database/Schema: BLUDBPRD / EDRTLRP1D                                 			* 
+* Source Table Name		: BASEL_REVLVNG_CR_MTH_SNAPSHOT,BASEL_REVLVNG_CR_BASE_DRVD_VARS *
+							BASEL_REVLVNG_CR_ACCT_DRVD_VARS, BASEL_MORT_MTH_SNAPSHOT	*
+							BASEL_PSNL_LOAN_ACCT_DRVD_VARS, BASEL_MORT_ACCT_DRVD_VARS	*
+							BASEL_PSNL_LOAN_MTH_SNAPSHOT, BASEL_STEP_PLN_MTH_SNAPSHOT	*						
+* Target Database/Schema: BLUDBPRD / EDRTLRP1D											*
+* Target Table Name 	: BASEL_STEP_SCORECRD_DRVD_VARS									*
+* SAS Code Location		: /sasdata/sasdi/sasprod/sas/rrap_iias							* 
+* Created on			: Thursday, October 30, 2021 2:36:46 PM EDT             		* 
+* Created by			: owprdsas                                              		* 
+* Updated on			: Friday, January 14, 2022			 							*
+* Updated by			: Vijay Kadiyala												*
+* Version				: SAS Enterprise Guide 7.1										*	
+****************************************************************************************/ 
+
+/*************************************************************************************
+Added by Hadi Dimashkieh - 20220830
+
+*** Tables identified as being in the RRAP schema will have a view created 
+*** in the IFRS9 schema with the SAME NAME which will point to the RRAP table.
+
+DDL Required:
+IFRS9	AUDIT_JOB_TIMER_CHECK
+
+**** SOURCES:
+SCHEMA  TABLENAME
+
+RRAP	BASEL_REVLVNG_CR_MTH_SNAPSHOT
+IFRS9	BASEL_REVLVNG_CR_BASE_DRVD_VARS
+RRAP	BASEL_STEP_PLN_MTH_SNAPSHOT
+RRAP	BASEL_MORT_MTH_SNAPSHOT
+RRAP	BASEL_MORT_ACCT_DRVD_VARS
+IFRS9	BASEL_REVLVNG_CR_ACCT_DRVD_VARS
+RRAP	BASEL_PSNL_LOAN_ACCT_DRVD_VARS
+RRAP	BASEL_PSNL_LOAN_MTH_SNAPSHOT
+
+
+TARGET: 
+
+IFRS9	BASEL_STEP_SCORECRD_DRVD_VARS
+
+****************************************************************************************/
+
+%put WORK LOCATION: %sysfunc(getoption(work));
+%include '/sasdata/sasdi/sasprod/macro/rrap_iias/rrap_iias_ifrs_autoexec.sas';
+%rrap_ifrs9_autoexec(ENV=PROD);
+
+/*%rrap_autoexec(RRAPENV=REVOLVING_CREDIT);*/
+/*%LET IIASDB=BLUDBPRD; */
+/*%LET net_db = EDRTLRP1D;*/
+/*%let MTH_TM_ID=19036;*/
+/*LIBNAME NZRRAP DB2 DATABASE="&IIASDB" SCHEMA="&net_db" user=s2993929 password="{SAS002}40B5D723325E15AA369CFFD62E2FC24539AEE767201ED12037E24F7F"  readbuff=10000 INSERTBUFF=10000ACCESS=READONLY;*/
+
+DATA _NULL_;
+	CALL SYMPUTX('PROCESSSTARTTIME',PUT(DATETIME(),DATETIME25.0));
+RUN;
+%let TM_ID=&MTH_TM_ID.;
+
+
+/*Parallel*/
+/*1.1 m_DM_RRAP_Ins_BASEL_CUST_STEP_DRVD_VARS_AVG_KS_F*/
+
+PROC SQL ;
+CONNECT USING NZRRAP AS NZCON;		
+   create table STEP_DRVD_VARS_AVG_KS_F_0 as
+    select *              
+    from connection to NZCON
+	( select b.STEP_PLN_AGRMNT_NUM,
+		(case when max_BNS_DLQNT_DAY=0 OR CNT_STEP_PLN_AGRMNT_NUM=0 OR CNT_STEP_PLN_AGRMNT_NUM is null then null
+	else  max_BNS_DLQNT_DAY/CNT_STEP_PLN_AGRMNT_NUM end) STEP_WORST_DAY_REVLVNG_CR_DLQNT
+	
+	from 
+		(SELECT STEP_PLN_AGRMNT_NUM,max(BNS_DLQNT_DAY) max_BNS_DLQNT_DAY /*,count(BNS_DLQNT_DAY) cnt_BNS_DLQNT_DAY */
+		FROM 		
+		(SELECT 
+		B.MTH_TM_ID, 
+		max(CASE WHEN (B.BNS_DLQNT_DAY-30)<0 THEN 0 ELSE (B.BNS_DLQNT_DAY-30) end) as BNS_DLQNT_DAY,
+		B.STEP_PLN_AGRMNT_NUM
+		FROM  &net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT B , 
+		&net_db..BASEL_REVLVNG_CR_BASE_DRVD_VARS C 
+		WHERE B.BASEL_ACCT_ID=C.BASEL_ACCT_ID AND B.MTH_TM_ID=C.MTH_TM_ID AND C.SML_BUS_F='N' AND C.CONSM_PRD_TREATMNT_CD='A'
+		AND B.STEP_PLN_SNAPSHOT_ID <>-1 AND B.MTH_TM_ID>=&MTH_TM_ID.-440 AND B.MTH_TM_ID<=&MTH_TM_ID. 
+		and  B.STEP_PLN_AGRMNT_NUM IS NOT NULL
+			group by STEP_PLN_AGRMNT_NUM, B.MTH_TM_ID) aa
+			group by MTH_TM_ID,STEP_PLN_AGRMNT_NUM ) b
+	left join (
+
+		SELECT COUNT(1) as CNT_STEP_PLN_AGRMNT_NUM, 
+					STEP_PLN_AGRMNT_NUM as STEP_PLN_AGRMNT_NUM 
+					FROM (
+						SELECT  DISTINCT  MTH_TM_ID,  STEP_PLN_AGRMNT_NUM 
+						FROM  &net_db..BASEL_STEP_PLN_MTH_SNAPSHOT
+						WHERE MTH_TM_ID>=&MTH_TM_ID. - 440
+						AND   MTH_TM_ID<=&MTH_TM_ID.
+						) GROUP BY STEP_PLN_AGRMNT_NUM) c on b.STEP_PLN_AGRMNT_NUM=c.STEP_PLN_AGRMNT_NUM
+);
+quit;
+/* Summarize at STEP_PLN-AGRMNT_NUM Level */
+proc sql;
+	create table STEP_DRVD_VARS_AVG_KS_F as
+	select STEP_PLN_AGRMNT_NUM,sum(STEP_WORST_DAY_REVLVNG_CR_DLQNT) as STEP_WORST_DAY_REVLVNG_CR_DLQNT
+	from STEP_DRVD_VARS_AVG_KS_F_0
+	group by STEP_PLN_AGRMNT_NUM;
+quit;
+
+
+
+/*1.2. m_DM_RRAP_Ins_BASEL_CUST_STEP_DRVD_VARS_CNT_MO_F*/
+PROC SQL ;
+CONNECT USING NZRRAP AS NZCON;		
+   create table STEP_DRVD_VARS_CNT_MO_F as
+    select *              
+    from connection to NZCON
+	( select 		
+		B.STEP_PLN_AGRMNT_NUM, count(B.BASEL_ACCT_ID) as STEP_MORT_ACCT_CNT
+		FROM 
+		&net_db..BASEL_MORT_MTH_SNAPSHOT B,
+		&net_db..BASEL_MORT_ACCT_DRVD_VARS C
+		WHERE  B.STEP_PLN_AGRMNT_NUM IS NOT NULL
+		AND B.BASEL_ACCT_ID=C.BASEL_ACCT_ID
+		AND C.MTH_TM_ID=&MTH_TM_ID.
+		AND C.CONSM_PRD_TREATMNT_CD='A'
+		AND B.STEP_PLN_SNAPSHOT_ID <>-1
+		AND B.MTH_TM_ID=&MTH_TM_ID.
+		group by 	B.STEP_PLN_AGRMNT_NUM
+	);
+	quit;
+
+
+
+
+/*1.3.m_DM_RRAP_Ins_BASEL_CUST_STEP_DRVD_VARS_MAX_MO_F*/
+
+
+PROC SQL ;
+CONNECT USING NZRRAP AS NZCON;		
+   create table STEP_DRVD_VARS_MAX_MO_F as
+    select *              
+    from connection to NZCON
+	 (	select STEP_PLN_AGRMNT_NUM,  
+			DLQNT_DAY_max_CNT as STEP_MORT_MAX_24_MTH_WORST_DLQN
+			from(	SELECT 
+					B.MTH_TM_ID, 
+					B.STEP_PLN_AGRMNT_NUM,  
+					max(C.DLQNT_DAY_CNT) as DLQNT_DAY_max_CNT
+					FROM 
+					&net_db..BASEL_MORT_MTH_SNAPSHOT B,
+					&net_db..BASEL_MORT_ACCT_DRVD_VARS C
+					WHERE B.STEP_PLN_AGRMNT_NUM IS NOT NULL
+					AND B.BASEL_ACCT_ID=C.BASEL_ACCT_ID
+					AND B.MTH_TM_ID=C.MTH_TM_ID
+					AND C.CONSM_PRD_TREATMNT_CD='A'
+					AND B.STEP_PLN_SNAPSHOT_ID <>-1
+					AND B.MTH_TM_ID>=&MTH_TM_ID.-920
+					AND B.MTH_TM_ID<=&MTH_TM_ID.
+					group by B.MTH_TM_ID, 
+					B.STEP_PLN_AGRMNT_NUM)
+				);
+	quit;
+
+/*1.4.m_DM_RRAP_Ins_BASEL_CUST_STEP_DRVD_VARS_RTO_SPL_F*/
+
+
+PROC SQL ;
+CONNECT USING NZRRAP AS NZCON;		
+   create table STEP_DRVD_VARS_RTO_SPL_F as
+    select *              
+    from connection to NZCON
+	 ( select STEP_PLN_AGRMNT_NUM,
+/*	 			ACCT_LIMIT,*/
+/*				OS_BAL_AMT*/
+				(case when (SUM(OS_BAL_AMT)=0 OR SUM(ACCT_LIMIT)=0) then 0
+						else SUM(OS_BAL_AMT)/SUM(ACCT_LIMIT) end) as STEP_PLN_UTLTN_RTO
+	   from (
+			SELECT DISTINCT 
+			D.MTH_TM_ID, 
+			D.CR_LMT_AMT AS ACCT_LIMIT,
+			D.STEP_PLN_AGRMNT_NUM,
+			B.BASEL_ACCT_ID,
+			B.OS_BAL_AMT 
+			FROM 
+			&net_db..BASEL_REVLVNG_CR_ACCT_DRVD_VARS B,
+			&net_db..BASEL_REVLVNG_CR_BASE_DRVD_VARS C,
+			&net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT D
+			WHERE D.STEP_PLN_AGRMNT_NUM IS NOT NULL
+			AND B.BASEL_ACCT_ID=C.BASEL_ACCT_ID
+			AND B.MTH_TM_ID=&MTH_TM_ID.
+			AND C.MTH_TM_ID=&MTH_TM_ID.
+			AND C.SML_BUS_F='N'
+			AND C.CONSM_PRD_TREATMNT_CD='A'
+			AND D.STEP_PLN_SNAPSHOT_ID <>-1
+			AND D.BASEL_ACCT_ID=B.BASEL_ACCT_ID
+			AND D.MTH_TM_ID=&MTH_TM_ID.
+
+			UNION 
+
+			SELECT DISTINCT 
+			D.MTH_TM_ID, 
+			B.OS_BAL_AMT AS ACCT_LIMIT,
+			D.STEP_PLN_AGRMNT_NUM,
+			B.BASEL_ACCT_ID,
+			B.OS_BAL_AMT 
+			FROM 
+			&net_db..BASEL_MORT_ACCT_DRVD_VARS B,
+			&net_db..BASEL_MORT_MTH_SNAPSHOT D
+			WHERE D.STEP_PLN_AGRMNT_NUM IS NOT NULL
+			AND B.BASEL_ACCT_ID=D.BASEL_ACCT_ID
+			AND B.MTH_TM_ID=&MTH_TM_ID.
+			AND B.CONSM_PRD_TREATMNT_CD='A'
+			AND D.STEP_PLN_SNAPSHOT_ID <>-1
+			AND D.MTH_TM_ID=&MTH_TM_ID.
+
+			UNION 
+
+			SELECT DISTINCT 
+			D.MTH_TM_ID, 
+			B.OS_BAL_AMT AS ACCT_LIMIT,
+			D.STEP_PLN_AGRMNT_NUM,
+			B.BASEL_ACCT_ID,
+			B.OS_BAL_AMT 
+			FROM 
+			&net_db..BASEL_PSNL_LOAN_ACCT_DRVD_VARS B,
+			&net_db..BASEL_PSNL_LOAN_MTH_SNAPSHOT D
+			WHERE D.STEP_PLN_AGRMNT_NUM IS NOT NULL
+			AND B.BASEL_ACCT_ID=D.BASEL_ACCT_ID
+			AND B.MTH_TM_ID=&MTH_TM_ID.
+			AND B.CONSM_PRD_TREATMNT_CD='A'
+			AND D.STEP_PLN_SNAPSHOT_ID <>-1
+			AND D.MTH_TM_ID=&MTH_TM_ID.)
+			group by STEP_PLN_AGRMNT_NUM
+			);
+			quit;
+
+/*2. m_DM_RRAP_Del_TARGET_DATA*/
+
+/*3. m_DM_RRAP_Ins_BASEL_STEP_SCORECRD_DRVD_VARS*/
+
+/*SELECT  PRIM_BASEL_CUST_ID AS PRIM_BASEL_CUST_ID,  STEP_PLN_SNAPSHOT_ID AS STEP_PLN_SNAPSHOT_ID FROM EDRTLRP1D.BASEL_STEP_PLN_MTH_SNAPSHOT*/
+
+PROC SQL ;
+CONNECT USING NZRRAP AS NZCON;		
+   create table SQ_BASEL_STEP_PLN_MTH_SNAPSHOT as
+    select *              
+    from connection to NZCON
+	 ( 
+			SELECT DISTINCT 
+A.STEP_PLN_SNAPSHOT_ID,
+A.MTH_TM_ID,
+LTRIM(RTRIM(A.STEP_PLN_AGRMNT_NUM)) as STEP_PLN_AGRMNT_NUM
+
+FROM &net_db..BASEL_STEP_PLN_MTH_SNAPSHOT A 
+WHERE  (A.STEP_PLN_AGRMNT_NUM IS NOT NULL OR A.STEP_PLN_AGRMNT_NUM <> -1)
+AND A.MTH_TM_ID=&MTH_TM_ID. 
+AND A.STEP_PLN_SNAPSHOT_ID IN 
+(
+		SELECT D.STEP_PLN_SNAPSHOT_ID
+		FROM 
+		&net_db..BASEL_REVLVNG_CR_BASE_DRVD_VARS C,
+		&net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT D
+		WHERE C.BASEL_ACCT_ID=D.BASEL_ACCT_ID
+		AND C.MTH_TM_ID=D.MTH_TM_ID
+		AND C.SML_BUS_F='N'
+		AND C.CONSM_PRD_TREATMNT_CD='A'
+		AND D.STEP_PLN_SNAPSHOT_ID <>-1
+		AND D.MTH_TM_ID=&MTH_TM_ID.
+
+		UNION ALL
+
+		SELECT D.STEP_PLN_SNAPSHOT_ID
+		FROM 
+		&net_db..BASEL_MORT_ACCT_DRVD_VARS B,
+		&net_db..BASEL_MORT_MTH_SNAPSHOT D
+		WHERE B.BASEL_ACCT_ID=D.BASEL_ACCT_ID
+		AND B.MTH_TM_ID=D.MTH_TM_ID
+		AND B.CONSM_PRD_TREATMNT_CD='A'
+		AND D.STEP_PLN_SNAPSHOT_ID <>-1
+		AND D.MTH_TM_ID=&MTH_TM_ID.
+
+		UNION  ALL
+
+		SELECT D.STEP_PLN_SNAPSHOT_ID 
+		FROM 
+		&net_db..BASEL_PSNL_LOAN_ACCT_DRVD_VARS B,
+		&net_db..BASEL_PSNL_LOAN_MTH_SNAPSHOT D
+		WHERE B.BASEL_ACCT_ID=D.BASEL_ACCT_ID
+		AND B.MTH_TM_ID=D.MTH_TM_ID
+		AND B.CONSM_PRD_TREATMNT_CD='A'
+		AND D.STEP_PLN_SNAPSHOT_ID <>-1
+		AND D.MTH_TM_ID=&MTH_TM_ID.
+		)
+
+ORDER BY STEP_PLN_AGRMNT_NUM
+);
+quit;
+
+
+PROC SQL ;
+CONNECT USING NZRRAP AS NZCON;		
+   create table PRIME_CUST as
+    select *              
+    from connection to NZCON
+	 ( 
+SELECT PRIM_BASEL_CUST_ID as PRIM_BASEL_CUST_ID, STEP_PLN_SNAPSHOT_ID as STEP_PLN_SNAPSHOT_ID FROM &net_db..BASEL_STEP_PLN_MTH_SNAPSHOT
+);
+quit;
+
+proc sql;
+create table MERGE1 as
+select b.*,
+(case when STEP_WORST_DAY_REVLVNG_CR_DLQNT eq . then 0.0000 else round(STEP_WORST_DAY_REVLVNG_CR_DLQNT,.0001) end) format 13.4 as AVG_12_MTH_STEP_WORST_DAY_REVLVN
+from SQ_BASEL_STEP_PLN_MTH_SNAPSHOT b
+	 LEFT JOIN STEP_DRVD_VARS_AVG_KS_F a ON strip(a.STEP_PLN_AGRMNT_NUM)=strip(b.STEP_PLN_AGRMNT_NUM);
+quit;
+
+proc sql;
+create table MERGE2 as
+select b.*,(case when STEP_MORT_ACCT_CNT eq . then 0 else STEP_MORT_ACCT_CNT end)  format 11. as STEP_MORT_ACCT_CNT
+from merge1 b
+	 LEFT JOIN STEP_DRVD_VARS_CNT_MO_F a ON strip(a.STEP_PLN_AGRMNT_NUM)=strip(b.STEP_PLN_AGRMNT_NUM);
+quit;
+
+proc sql;
+create table MERGE3 as
+select b.*,round(STEP_PLN_UTLTN_RTO,.0001) format 13.4 as STEP_PLN_UTLTN_RTO
+from merge2 b
+	 LEFT JOIN STEP_DRVD_VARS_RTO_SPL_F a ON strip(a.STEP_PLN_AGRMNT_NUM)=strip(b.STEP_PLN_AGRMNT_NUM);
+quit;
+
+
+proc sql;
+	create table LOAD as
+	select b.STEP_PLN_SNAPSHOT_ID,b.MTH_TM_ID,AVG_12_MTH_STEP_WORST_DAY_REVLVN,STEP_MORT_ACCT_CNT,STEP_PLN_UTLTN_RTO,
+	(case when a.PRIM_BASEL_CUST_ID eq . then -1 else a.PRIM_BASEL_CUST_ID end) as BASEL_CUST_ID,
+	"&SYSDATE9.:&SYSTIME."dt format datetime25.6 as INSRT_PROCESS_TMSTMP,
+	"&SYSDATE9.:&SYSTIME."dt  format datetime25.6 as UPDT_PROCESS_TMSTMP
+	from merge3 b
+	 LEFT JOIN PRIME_CUST a ON a.STEP_PLN_SNAPSHOT_ID=b.STEP_PLN_SNAPSHOT_ID;
+quit;
+
+
+/*%LET IIASDB=BLUDBDEV; */
+/*%LET net_db = EDRTLRD1D;*/
+/**/
+/*LIBNAME NZRRAP   DB2 DATABASE="&IIASDB" SCHEMA="&net_db" USER=s1699756 PASSWORD="{SAS002}1F61571E271F050F28CF5AFA1BC7395A4BE3D66A44191D0429F60B0E057727EB" readbuff=10000 INSERTBUFF=10000 PRESERVE_USER=YES;*/
+
+PROC SQL NOPRINT;
+         	CONNECT USING NZRRAP AS NZCON;
+         	EXECUTE(DELETE FROM &net_db..BASEL_STEP_SCORECRD_DRVD_VARS WHERE MTH_TM_ID=&MTH_TM_ID. ) BY NZCON;
+QUIT;
+
+proc append base=NZRRAP.BASEL_STEP_SCORECRD_DRVD_VARS  (BULKLOAD=YES BL_METHOD=CLILOAD) data=LOAD force ; run;
+
+
+data _null_;
+	if 0 then set SQ_BASEL_STEP_PLN_MTH_SNAPSHOT Nobs=Number_of_Obs; 
+	call symputx('SourceRec',Number_of_Obs); 
+	stop; 
+run;
+%put SourceRec=&SourceRec.;
+
+data _null_;
+	if 0 then set LOAD Nobs=Number_of_Obs; 
+	call symputx('TargetRec',Number_of_Obs); 
+	stop; 
+run;
+%put TargetRec=&TargetRec.;
+
+DATA _NULL_;
+		CALL SYMPUTX('PROCESSENDTIME',PUT(DATETIME(),DATETIME25.0));
+		CALL SYMPUTX('PROCESSRUNTIME',PUT((DATETIME()-"&PROCESSSTARTTIME"dt),TIME.));
+RUN;
+
+
+PROC SQL NOPRINT;
+	 insert into NZRRAP.AUDIT_JOB_TIMER_CHECK (Job_name, MTH_TM_ID, START_Time, End_Time, Source_count, Target_Count)
+	values(		'J_RRII_KS10_2111_DM_RRAP_BASEL_STEP_SCORECRD_DRVD_VARS',
+			&TM_ID.,
+			"&PROCESSSTARTTIME"dt,
+			"&PROCESSENDTIME"dt,
+			&SourceRec.,
+			&TargetRec.
+		);
+QUIT;
+
+
+/***************************** END ******************************/

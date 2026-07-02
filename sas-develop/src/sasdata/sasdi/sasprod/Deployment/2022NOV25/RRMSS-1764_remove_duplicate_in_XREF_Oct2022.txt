@@ -1,0 +1,17 @@
+
+
+Take backup of below, backup table name= edrtlrp1d.EAD_SEG_ACCT_XREF_dupl_oct2022
+
+SELECT * FROM edrtlrp1d.EAD_SEG_ACCT_XREF WHERE BASEL_MODEL_ID = 8004 AND BASEL_ACCT_ID =-1 AND MTH_TM_ID = 19516
+
+
+--SELECT * 
+DELETE FROM edrtlrp1d.EAD_SEG_ACCT_XREF
+WHERE rowId = (
+SELECT max (rowId)    FROM edrtlrp1d.EAD_SEG_ACCT_XREF
+WHERE    BASEL_MODEL_ID = 8004 AND BASEL_ACCT_ID = -1 AND MTH_TM_ID = 19516
+)
+
+
+execute sql query to ensure only 1 record remains
+SELECT * FROM edrtlrp1d.EAD_SEG_ACCT_XREF WHERE BASEL_MODEL_ID = 8004 AND BASEL_ACCT_ID =-1 AND MTH_TM_ID = 19516

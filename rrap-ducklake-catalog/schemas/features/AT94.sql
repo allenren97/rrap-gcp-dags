@@ -1,0 +1,8 @@
+-- AT94 feature definition
+CREATE TABLE IF NOT EXISTS features.AT94 (
+    OBSN_DT DATE NOT NULL,
+    BASEL_CUST_ID BIGINT NOT NULL,
+    AT94 INTEGER
+);
+-- Set partitions 
+ALTER TABLE features.AT94 SET PARTITIONED BY (OBSN_DT);

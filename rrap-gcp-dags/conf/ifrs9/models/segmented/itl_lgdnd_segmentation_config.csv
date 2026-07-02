@@ -1,0 +1,10 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_CROSS_DEFAULT_ORIG,MODEL_EXCL_F_V2,TREATMENT_F,PRD_ID,OS_BAL_AMT_V2,SUB_PORT_F,Output
+Special Segment ,,,CUR,"IN ('Y', 'N')",A,"IN ('S09', 'S10', 'S12', 'S13', 'S15')",<1000,,7
+Special Segment ,>=0,,CUR,"IN ('Y', 'N')",A,"IN ('S09', 'S10', 'S12', 'S13', 'S15')",<1000,,7
+Special Segment,,,CUR,Y,A,"IN ('S11', 'S14')",,,8
+<=336,,<=336,CUR,N,A,"IN ('S09', 'S10', 'S12', 'S13', 'S15')",>=1000,,1
+"[337,536]",>=337,<=536,CUR,N,A,"IN ('S09', 'S10', 'S12', 'S13', 'S15')",>=1000,,2
+"[537,611]",>=537,<=611,CUR,N,A,"IN ('S09', 'S10', 'S12', 'S13', 'S15')",>=1000,,3
+"[612,729]",>=612,<=729,CUR,N,A,"IN ('S09', 'S10', 'S12', 'S13', 'S15')",>=1000,,4
+"[730,813]",>=730,<=813,CUR,N,A,"IN ('S09', 'S10', 'S12', 'S13', 'S15')",>=1000,,5
+">=814",>=814,,CUR,N,A,"IN ('S09', 'S10', 'S12', 'S13', 'S15')",>=1000,,6

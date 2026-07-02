@@ -1,0 +1,3 @@
+# The second line is the email list for normal report; the third line is the email list for normal report above SI threshold
+"Carol.Gardner@scotiabank.com" "frank.russo@scotiabank.com" "wanda.kemp@scotiabank.com" "brent.mathers@scotiabank.com" "frank.bai@scotiabank.com" "vita.kornieva@scotiabank.com" "haichuan.luo@scotiabank.com" "GRT-Model-Support@scotiabank.com" "RMA-Dev-Support@scotiabank.com" "RMA-Quality@scotiabank.com"
+"Carol.Gardner@scotiabank.com" "frank.russo@scotiabank.com" "wanda.kemp@scotiabank.com" "brent.mathers@scotiabank.com" "frank.bai@scotiabank.com" "vita.kornieva@scotiabank.com" "haichuan.luo@scotiabank.com" "GRT-Model-Support@scotiabank.com" "RMA-Dev-Support@scotiabank.com" "RMA-Quality@scotiabank.com"

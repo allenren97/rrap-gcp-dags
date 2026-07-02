@@ -1,0 +1,3 @@
+#The Second line is the email list for the RMA list; the third line is the email list for the CMF list
+"RMA-Dev-Support@scotiabank.com" "RMAModelCompliance@scotiabank.com" "RMA-Quality@scotiabank.com" "edwsupport@scotiabank.com" "GRT-Model-Support@scotiabank.com" "zulfiqar.hyder@scotiabank.com" "Carol.Gardner@scotiabank.com" "GRT-Model-Support@scotiabank.com"
+"RMA-Dev-Support@scotiabank.com" "RMAModelCompliance@scotiabank.com" "RMA-Quality@scotiabank.com" "edwsupport@scotiabank.com" "GRT-Model-Support@scotiabank.com" "zulfiqar.hyder@scotiabank.com" "Carol.Gardner@scotiabank.com" "GRT-Model-Support@scotiabank.com"

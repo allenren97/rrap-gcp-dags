@@ -1,0 +1,22 @@
+NCR Exposure Class Key Value,NCR Exposure Class Description,CCAR Exposure Class Name,BCAR Schedule Number,BCAR Exposure class Name,FRS Code
+0500,Total Retail,Total Retail,,Total Retail,
+0501,Mortgage and HELOC, Mortgage and HELOC,, Mortgage and HELOC,
+0502,Mortgage,Mortgage,30,Mortgage,412
+0503,HELOC,HELOC,31,HELOC,440
+0504,Total QRRE,Revolving Credit,,Revolving Credit,
+0505,Credit Card,Credit Card,33,Credit Card,425
+0506,LOC,Line Of Credit,33,Line Of Credit,426
+0507,Other Retail,Other Retail,32,Other Retail,430
+0510,Residential Mortgage - CMHC Insured,CMHC,30,CMHC,414
+0511,Residential Mortgage - Other Insured,GE,30,GE,415
+0512,Residential Mortgage - Non-Insured,Real Estate Secured,30,Real Estate Secured,413
+0598,Unknown,Unknown,,Unknown,
+0599,No Exposure Class,No Exposure class,,No Exposure class,
+5501,Residential Mortgage - Insured,Mortgage,30,Mortgage,
+5502,Residential Mortgage - Uninsured,Mortgage,30,Mortgage,
+5503,Home Equity Line of Credit,HELOC,31,HELOC,
+5504,Credit Card (Transactor and Non-Transactor),Credit Card,33,Credit Card,
+5505,Line of Credit and Overdraft (Transactor and Non-Transactor),Line Of Credit,33,Line Of Credit,
+5506,Indirect Auto,Other Retail,32,Other Retail,
+5507,SBE Treated As Retail,,,,
+5508,Other Retail,Other Retail,32,Other Retail,

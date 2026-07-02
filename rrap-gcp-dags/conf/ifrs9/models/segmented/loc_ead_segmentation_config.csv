@@ -1,0 +1,7 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_CROSS_DEFAULT_ORIG,CONSM_SCORECRD_EXCLSN_F,TREATMENT_F,Output
+Defaulted accounts,,,DEF,,A,99
+Special Segment,,,CUR,Y,A,98
+"<314.5",< 314.5,,,,,1
+"[314.5, 508.5)",>=314.5,<508.5,,,,2
+"[508.5,692.5)",>=508.5,<692.5,,,,3
+">=692.5",>=692.5,,,,,4

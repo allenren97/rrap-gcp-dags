@@ -1,0 +1,5 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_ACCOUNT,MODEL_EXCL_F,WRITTEN_OUT_F,CR_LMT_AMT,TOT_NEW_BAL_AMT,Output
+Special Segment,,,CUR,Y,,,,98
+Special Segment,,,CUR,,Y,,,98
+Special Segment,,,CUR,,,<=0,<=0,98
+All Standalone HELOC LGD-ND accounts except for special segment,,,CUR,N,N,,,1

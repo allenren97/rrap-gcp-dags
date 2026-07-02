@@ -1,0 +1,3 @@
+recursive-include schemas *
+recursive-include bin *
+include ./deploy.sh

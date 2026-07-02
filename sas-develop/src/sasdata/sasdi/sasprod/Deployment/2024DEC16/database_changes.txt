@@ -1,0 +1,49 @@
+Change Ticket: CHG0955418
+
+Deployment Steps for RRMSS-3117
+
+    STEP - 1
+        Create table EDRTLRP1D.REPLICATION_LKP using this DDL: 
+            CREATE TABLE EDRTLRP1D.REPLICATION_LKP
+            (
+            REPLICATION_METHOD VARCHAR(10),
+            REPLICATION_SEQUENCE INTEGER,
+            IIAS_SCHEMA VARCHAR(200),
+            GCP_SCHEMA VARCHAR(200),
+            TABLE_NAME VARCHAR(200)
+            )
+        Needs replication to DR, please include 2 additional hidden columns.
+
+    STEP - 2
+        Create table EDRTLRP1D.INGRESS_AUDIT using this DDL: 
+            CREATE TABLE EDRTLRP1D.INGRESS_AUDIT
+            (
+            PROCESS_MTH CHARACTER(10),
+            TABLE_NAME VARCHAR(200),
+            ORIGIN_RECORD_COUNT BIGINT,
+            INSERT_DATE TIMESTAMP
+            )
+        Needs replication to DR, please include 2 additional hidden columns.
+
+    STEP - 3
+        Copy all data from IIAS UAT EDRTLRD1D.REPLICATION_LKP to IIAS PROD EDRTLRP1D.REPLICATION_LKP
+        NOTE: UAT Schema and PROD schema are different.
+
+
+Deployment Steps for RRMSS-3341
+
+    STEP - 1   
+    Create table EDRLGD.AUDIT_RESULT using this DDL: 
+        CREATE TABLE EDRLGD.AUDIT_RESULT
+        (
+        PROCESS_MTH CHARACTER(10),
+        REPLICATION_METHOD VARCHAR(10),
+        TABLE_NAME VARCHAR(200),
+        IIAS_RECORD_COUNT BIGINT,
+        GCP_RECORD_COUNT BIGINT,
+        DIFF_RECORD BIGINT,
+        DUPLICATION CHARACTER(1),
+        RESULT CHARACTER(4),
+        INSERT_DATE TIMESTAMP
+        )
+    Needs replication to DR, please include 2 additional hidden columns.

@@ -1,0 +1,8 @@
+-- BR34 feature definition
+CREATE TABLE IF NOT EXISTS features.BR34 (
+    OBSN_DT DATE NOT NULL,
+    BASEL_CUST_ID BIGINT NOT NULL,
+    BR34 INTEGER
+);
+-- Set partitions 
+ALTER TABLE features.BR34 SET PARTITIONED BY (OBSN_DT);

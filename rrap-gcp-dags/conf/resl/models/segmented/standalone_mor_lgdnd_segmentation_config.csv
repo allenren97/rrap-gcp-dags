@@ -1,0 +1,7 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,MODEL_EXCL_F,WRITTEN_OUT_F,TOTAL_BALANCE,STEP_STANDALONE_MONTH_DEF_SINCE_LAST_DEF,INSURANCE_F,Output
+Special Segment,,,Y,,,,,98
+Special Segment,,,,Y,,,,98
+Special Segment,,,,,<=0,,,98
+Uninsured,,,,,,,uninsured,1
+Insured,,,,,,,Insured,2
+Bulk,,,,,,,BULK,3

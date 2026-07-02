@@ -1,0 +1,5 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,BNS_DLQNT_DAY,PIT_STAT_VER_2_CD,MODEL_EXCLUSION_F,Output
+Current (0 days delinquent),,,0,CUR,N,4
+Current (<120 days delinquent),,,<120,CUR,N,5
+Defaulted (>=120 days delinquent),,,,DEF,N,99
+Special Segment,,,,,Y,98

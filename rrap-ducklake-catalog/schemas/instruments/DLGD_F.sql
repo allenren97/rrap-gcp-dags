@@ -1,0 +1,13 @@
+CREATE TABLE
+    IF NOT EXISTS instruments.DLGD_F (
+        BASEL_ACCT_ID BIGINT NOT NULL,
+        OBSN_DT DATE NOT NULL,
+        DLGD_F VARCHAR,
+        STREAM VARCHAR
+    )
+;
+
+ALTER TABLE instruments.DLGD_F
+SET
+    PARTITIONED BY (OBSN_DT, STREAM)
+;

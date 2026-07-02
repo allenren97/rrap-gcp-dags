@@ -1,0 +1,6 @@
+# The second line is the email list for normal report; the third line is the email list for normal report above SI threshold
+"frank.russo@scotiabank.com" "liliya.kuznetsova@scotiabank.com" "Nelly.Selitser@scotiabank.com" "edwsupport@scotiabank.com" "ganeshbhagwan.patro@scotiabank.com" "rrmss_support@scotiabank.com" "stevenq.xu@scotiabank.com" "rui.luo@scotiabank.com" "eric.wolfe@scotiabank.com" "wanda.kemp@scotiabank.com" "nimrat.grewal@scotiabank.com" "Derek.Landau@scotiabank.com" "prashan.vethanayagam@scotiabank.com" "michelle.kao@scotiabank.com"
+"frank.russo@scotiabank.com" "Leonid.Kushnir@scotiabank.com" "Nelly.Selitser@scotiabank.com" "liliya.kuznetsova@scotiabank.com" "edwsupport@scotiabank.com" "ganeshbhagwan.patro@scotiabank.com" "rrmss_support@scotiabank.com" "stevenq.xu@scotiabank.com" "rui.luo@scotiabank.com" "eric.wolfe@scotiabank.com" "wanda.kemp@scotiabank.com" "nimrat.grewal@scotiabank.com" "Derek.Landau@scotiabank.com" "prashan.vethanayagam@scotiabank.com" "michelle.kao@scotiabank.com"
+
+
+

@@ -1,0 +1,8 @@
+-- AT36 feature definition
+CREATE TABLE IF NOT EXISTS features.AT36 (
+    OBSN_DT DATE NOT NULL,
+    BASEL_CUST_ID BIGINT NOT NULL,
+    AT36 INTEGER
+);
+-- Set partitions 
+ALTER TABLE features.AT36 SET PARTITIONED BY (OBSN_DT);

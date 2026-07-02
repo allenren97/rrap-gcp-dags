@@ -1,0 +1,8 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_ACCOUNT,MODEL_EXCL_F,WRITTEN_OUT_F,CR_LMT_AMT,TOT_NEW_BAL_AMT,STEP_STANDALONE_MONTH_DEF_SINCE_LAST_DEF,Output
+Defaulted accounts with number of consecutive months being default < 36 months.,,,DEF,N,N,>0,,<=36,1
+Defaulted accounts with number of consecutive months being default < 36 months.,,,DEF,N,N,,>0,<=36,1
+Special Segment (excluded accounts),,,DEF,Y,,,,,98
+Special Segment (excluded accounts),,,DEF,,Y,,,,98
+Special Segment (excluded accounts),,,DEF,,,<=0,<=0,,98
+Defaulted accounts with number of consecutive months being default > 36 months.,,,DEF,N,N,>0,,>36,99
+Defaulted accounts with number of consecutive months being default > 36 months.,,,DEF,N,N,,>0,>36,99

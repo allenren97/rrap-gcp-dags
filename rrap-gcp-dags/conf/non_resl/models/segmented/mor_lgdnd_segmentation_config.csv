@@ -1,0 +1,21 @@
+﻿Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,INSURANCE_IND,BULK_IND,TOTAL_BALANCE,CURRENT_BALANCE,TOTAL_SUSPENSE,FULL_PAID_OFF_F,PIT_STATUS_CROSS_DEFAULT_ORIG,Output
+Special Segment,,,,,,<=0,=0,Y,,98
+Special Segment,,,,,,,,,is None,98
+"Total_Balance^2 <= 5,000",,<=0,,,<= 5000,,,,,13
+"Total_Balance^2 <= 5,000",>0,,,,<= 5000,,,,,13
+"Total_Balance^2 <= 5,000",,,,,<= 5000,,,,,13
+"<166 OR MISSING AND Insurance_Ind = ""Uninsured"" ",,,Uninsured,,,,,,,1
+"<166 OR MISSING AND Insurance_Ind = ""Uninsured"" ",,< 166,Uninsured,,,,,,,1
+"[166, 370) AND Insurance_Ind = ""Uninsured""",>= 166,< 370,Uninsured,,,,,,,2
+"[370, 640) AND Insurance_Ind = ""Uninsured""",>= 370,< 640,Uninsured,,,,,,,3
+">=640 AND Insurance_Ind = ""Uninsured""",>= 640,,Uninsured,,,,,,,4
+"<166 OR MISSING AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""N""",,,Insured,N,,,,,,5
+"<166 OR MISSING AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""N""",,< 166,Insured,N,,,,,,5
+"[166, 370) AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""N""",>= 166,< 370,Insured,N,,,,,,6
+"[370, 640) AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""N""",>= 370,< 640,Insured,N,,,,,,7
+">=640 AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""N""",>= 640,,Insured,N,,,,,,8
+"<166 OR MISSING AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""Y""",,,Insured,Y,,,,,,9
+"<166 OR MISSING AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""Y""",,< 166,Insured,Y,,,,,,9
+"[166, 370) AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""Y""",>= 166,< 370,Insured,Y,,,,,,10
+"[370, 640) AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""Y""",>= 370,< 640,Insured,Y,,,,,,11
+">=640 AND Insurance_Ind = ""Insured"" AND Bulk_Ind = ""Y""",>= 640,,Insured,Y,,,,,,12

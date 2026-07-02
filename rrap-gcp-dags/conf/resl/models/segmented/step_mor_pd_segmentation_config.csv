@@ -1,0 +1,20 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_STEP,MODEL_EXCL_F,WRITTEN_OUT_F,TOTAL_BALANCE,Output
+Defaulted and Charged-off accounts (non-excluded accounts),>=0,,DEF,N,N,>0,99
+Defaulted and Charged-off accounts (non-excluded accounts),,<0,DEF,N,N,>0,99
+Defaulted and Charged-off accounts (non-excluded accounts),,,DEF,N,N,>0,99
+Defaulted and Charged-off accounts (non-excluded accounts),>=0,,CHG,N,N,>0,99
+Defaulted and Charged-off accounts (non-excluded accounts),,<0,CHG,N,N,>0,99
+Defaulted and Charged-off accounts (non-excluded accounts),,,CHG,N,N,>0,99
+Special Segment,>=0,,,Y,,,98
+Special Segment,,<0,,Y,,,98
+Special Segment,,,,Y,,,98
+Special Segment,>=0,,,,Y,,98
+Special Segment,,<0,,,Y,,98
+Special Segment,,,,,Y,,98
+Special Segment,>=0,,,,,<=0,98
+Special Segment,,<0,,,,<=0,98
+Special Segment,,,,,,<=0,98
+<=954,,<=954,CUR,N,N,>0,4
+"(954, 992]",>954,<=992,CUR,N,N,>0,3
+"(992, 1015]",>992,<=1015,CUR,N,N,>0,2
+>1015,>1015,,CUR,N,N,>0,1

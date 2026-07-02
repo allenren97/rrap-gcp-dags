@@ -1,0 +1,9 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,MONTH_DEF_SINCE_LAST_DEF,CONSM_SCORECRD_EXCLSN_F,Output
+Month_Def >=36,>0,,>=36,N,90
+Month_Def >=36,,<=0,>=36,N,90
+Month_Def >=36,,,>=36,N,90
+Special Segment,,,,Y,98
+<= 844,,<=844,<36,N,1
+"(844, 865]",>844,<=865,<36,N,2
+"(865, 880]",>865,<=880,<36,N,3
+> 880,>880,,<36,N,4

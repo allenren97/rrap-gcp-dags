@@ -1,0 +1,8 @@
+# Properties for CiaD Jenkins build pipelines 
+
+emailList: henry.iek@scotiabank.com
+skipFortifyScan: true
+skipUnitTests: true
+skipSonarScan: true
+versionDelimiter: -b
+packageType: tar

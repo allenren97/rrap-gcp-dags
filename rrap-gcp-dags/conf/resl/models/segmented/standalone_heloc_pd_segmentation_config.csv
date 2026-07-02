@@ -1,0 +1,12 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_ACCOUNT,MODEL_EXCL_F,WRITTEN_OUT_F,CR_LMT_AMT,TOT_NEW_BAL_AMT,Output
+>=1044,>=1044,,CUR,N,N,>0,,1
+>=1044,>=1044,,CUR,N,N,,>0,1
+"(1017, 1044)",>1017,<1044,CUR,N,N,>0,,2
+"(1017, 1044)",>1017,<1044,CUR,N,N,,>0,2
+<=1017,,<=1017,CUR,N,N,>0,,3
+<=1017,,<=1017,CUR,N,N,,>0,3
+Special Segment,,,,Y,,,,98
+Special Segment,,,,,Y,,,98
+Special Segment,,,,,,<=0,<=0,98
+Defaulted and Charged-off accounts (non-excluded accounts),,,DEF,N,N,,,99
+Defaulted and Charged-off accounts (non-excluded accounts),,,CHG,N,N,,,99

@@ -1,0 +1,6 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,MODEL_EXCL_F,TREATMENT_F,Output
+Special Segment,,,Y,A,98
+>= 514.5,>= 514.5,,,,4
+"[336, 515)",>= 336,<515,,,3
+"[146,336)",>= 146,<336,,,2
+<146 ,,<146,,,1

@@ -1,0 +1,8 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_CROSS_DEFAULT_ORIG,CONSM_SCORECRD_EXCLSN_F,CONSM_PRD_TREATMNT_CD,HELOC_F,MONTH_DEF_24M,Output
+<228,,<228,DEF,N,A,,<24,1
+"[228, 299.5)",>=228,<299.5,DEF,N,A,,<24,2
+"[299.5, 524.5)",>=299.5,<525.5,DEF,N,A,,<24,3
+">=524.5",>=524.5,,DEF,N,A,,<24,4
+"Accounts defaulted for 24 months or more",,<=1001,DEF,N,A,N,>=24,90
+"Accounts defaulted for 24 months or more",,,DEF,N,A,N,>=24,90
+Special Segment,,,DEF,Y,A,N,,98

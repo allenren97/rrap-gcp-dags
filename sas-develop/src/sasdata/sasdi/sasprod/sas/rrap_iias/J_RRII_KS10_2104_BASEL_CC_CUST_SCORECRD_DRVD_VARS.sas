@@ -1,0 +1,521 @@
+ /*****************************************************************************************
+ * Job:              			 
+ * Description:     This job loads the Customer Derived Variables for Basel III models  * 
+ * Source:          BASEL_REVLVNG_CR_MTH_SNAPSHOT 
+					BASEL_REVLVNG_CR_BASE_DRVD_VARS
+ *                  CR_BUREAU_DELI_MTH_SNAPSHOT 
+ * Target:			EDRTLRP1D.basel_rev_cc_pd_cust_drvd_vars			          		*
+ * Developed By:                      							      					* 
+ * Changes:			
+ *****************************************************************************************/ 
+
+DATA _NULL_;
+	CALL SYMPUTX('PROCESSSTARTTIME',PUT(DATETIME(),DATETIME25.0));
+RUN;
+
+%put WORK LOCATION: %sysfunc(getoption(work));
+%rrap_autoexec(RRAPENV=REVOLVING_CREDIT);
+
+PROC SQL NOPRINT;
+SELECT TM_LVL_END_DT format=YYMMDD10. INTO :MTH_END_DT FROM NZRRAP.TM_DIM WHERE TM_ID = &MTH_TM_ID.;
+QUIT;
+
+%LET MTH_END_DT = %sysfunc(dequote("'&MTH_END_DT'")) ;
+%LET TOT_UNP_FNC_CHRG=1098.3;
+
+%put &MTH_END_DT;
+%put &MTH_TM_ID;
+
+DATA _NULL_;
+PI_VALUE=CONSTANT("PI");
+CALL SYMPUT('PI', PI_VALUE);
+run;
+
+PROC SQL NOPRINT;
+       CONNECT USING NZRRAP AS NZCON;
+        EXECUTE (DELETE FROM &net_db..basel_cc_cust_scorecrd_drvd_vars WHERE MTH_TM_ID=&MTH_TM_ID) BY NZCON;
+QUIT;
+
+
+PROC SQL ;
+connect using NZRRAP as nzcon;	
+execute(
+INSERT INTO &net_db..basel_cc_cust_scorecrd_drvd_vars
+SELECT DISTINCT
+       ACCT.MTH_TM_ID,     
+       ACCT.PRIM_BASEL_CUST_ID BASEL_CUST_ID,           
+	   /* PD Transactor*/
+	   UTIL_KSC.UTIL_KSC,
+	   AT36_MIN3M.AT36_MIN3M,
+	   AT94_MIN24M.AT94_MIN24M,
+	   BR147_MAX3M.BR147_MAX3M,
+ 	   GO04_MAX6M.GO04_MAX6M,	  
+	   DEP_CNT_MIN6M.DEP_CNT_MIN6M,	 
+	   /*PD Revolver*/
+	   AT29_MAX3M.AT29_MAX3M,
+	   AT94_SUM3M.AT94_SUM3M,
+	   BY34_MAX3M.BY34_MAX3M,
+	   D2D_BAL_MIN3M.D2D_BAL_AMT_MIN3M,
+	   INVSTM_ACCT_AMT.INVSTM_ACCT_AMT,
+	   BNS_DLQNT_DAY_MAX6M.BNS_DLQNT_DAY_MAX6M,
+	   /*PD Delinquent*/
+	   AT23_MIN6M.AT23_MIN6M,
+	   AT83_MAX3M.AT83_MAX3M,
+	   GO06_MAX3M.GO06_MAX3M,
+	   BC33_AVG6M.BC33_AVG6M,
+	   D2D_BAL_AMT_INV.D2D_BAL_AMT_INV,
+	   TOT_UNP_FNC_CHRG_12M.TOT_UNP_FNC_CHRG_12M,
+	   /*LGD-D*/
+	   AT84_SUM12M.AT84_SUM12M,
+	   /*LGD-ND*/
+	    AT29_AVG6M.AT29_AVG6M,
+	    AT41.AT41,
+	    KSCAVG12M.KSCAVG12M AS BAL_HIST_CSH_ADV_KSCAVG12M,
+	    BC33_MAX6M.BC33_MAX6M,
+	    BNS_DLQNT_DAY_MAX24M.BNS_DLQNT_DAY_GP_KSCMAX24M	,
+	    GO11_AVG24M.GO11_AVG24M,
+	   /*EAD*/
+	    OVDR_CNT_SVG.OVDR_CNT_SVG,
+	    GO04_MAX24M.GO04_MAX24M,
+		SYSDATE,
+	   SYSDATE,
+	    AT21_MAX6M.AT21_MAX6M,
+	    PRCH_CRNT_C_BAL_KSCMAX3M.PRCH_CRNT_C_BAL_KSCMAX3M,
+	    HGST_DLQNT_DAY_COMBMAX24M.MAX_DLQNT_DAY_24M AS HGST_DLQNT_DAY_COMBMAX24M,
+		BR147_MAX6M.BR147_MAX6M
+FROM 
+ 	(SELECT distinct a.MTH_TM_ID, a.PRIM_BASEL_CUST_ID 
+		FROM &net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT a
+		LEFT JOIN &net_db..BASEL_REVLVNG_CR_BASE_DRVD_VARS b 
+		ON a.MTH_TM_ID = b.MTH_TM_ID
+		AND a.BASEL_ACCT_ID = b.BASEL_ACCT_ID
+		WHERE a.MTH_TM_ID=&mth_tm_id 
+		AND a.PRIM_BASEL_CUST_ID IS NOT NULL  
+		AND a.PRIM_BASEL_CUST_ID <> '-1' 
+		AND b.SML_BUS_F='N' 
+		AND b.CONSM_PRD_TREATMNT_CD='A') ACCT	
+
+LEFT JOIN
+	(select basel_cust_id, min(MTH_SINCE_MOST_RECNT_DLQNT_CNT) as AT36_MIN3M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-80 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) AT36_MIN3M 
+ON ACCT.PRIM_BASEL_CUST_ID = AT36_MIN3M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, min(TOT_AVL_CR_NOT_UTILIZED_AMT) as AT94_MIN24M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-920 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) AT94_MIN24M
+ON ACCT.PRIM_BASEL_CUST_ID = AT94_MIN24M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, max(MAX_REVLVNG_CR_CRNT_UTLTN_AMT) as BR147_MAX3M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-80 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) BR147_MAX3M
+ON ACCT.PRIM_BASEL_CUST_ID = BR147_MAX3M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, max(INQRY_CNT) as GO04_MAX6M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-200 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) GO04_MAX6M
+ON ACCT.PRIM_BASEL_CUST_ID = GO04_MAX6M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, min(DEP_CNT) as DEP_CNT_MIN6M
+	from &net_db..BASEL_TL_CUST_MTH_DEP_TXN_SUM	
+	where mth_tm_id >= &mth_tm_id-200 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) DEP_CNT_MIN6M
+ON ACCT.PRIM_BASEL_CUST_ID = DEP_CNT_MIN6M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select distinct prim_basel_cust_id, 
+		case WHEN (CR_LMT =0 AND TOT_BAL >0) THEN 1
+     		 WHEN TOT_BAL <0 THEN 0
+             WHEN CR_LMT <>0 THEN TOT_BAL/CR_LMT
+     		 ELSE null END AS UTIL_KSC
+	from 
+	(select distinct prim_basel_cust_id, sum(cr_lmt_amt) cr_lmt, sum(tot_new_bal_amt) tot_bal
+	from &net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT
+	where mth_tm_id = &mth_tm_id
+	group by prim_basel_cust_id) a 
+	) UTIL_KSC 
+ON ACCT.PRIM_BASEL_CUST_ID = UTIL_KSC.PRIM_BASEL_CUST_ID
+/* Revolver */
+LEFT JOIN
+	(select basel_cust_id, max(ACTV_INSTLMNT_TRDS_BAL_GT_ZERO_CNT) as AT29_MAX3M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-80 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) AT29_MAX3M
+ON ACCT.PRIM_BASEL_CUST_ID = AT29_MAX3M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, sum(TOT_AVL_CR_NOT_UTILIZED_AMT) as AT94_SUM3M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-80 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) AT94_SUM3M
+ON ACCT.PRIM_BASEL_CUST_ID = AT94_SUM3M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, max(TOT_UTLTN_BNK_REVLVNG_LINE_AMT) as BY34_MAX3M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-80 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) BY34_MAX3M
+ON ACCT.PRIM_BASEL_CUST_ID = BY34_MAX3M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, min(D2D_BAL_AMT) as D2D_BAL_AMT_MIN3M 
+	from &net_db..BASEL_TL_CUST_MTH_POSTN_SUM 
+	where mth_tm_id >= &mth_tm_id-80 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) D2D_BAL_MIN3M
+ON ACCT.PRIM_BASEL_CUST_ID = D2D_BAL_MIN3M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, sum(RGSTRD_INVSTMNT_BAL_AMT + NON_REGISTERED_INVSTMNT_BAL_AMT) as INVSTM_ACCT_AMT 
+	from &net_db..BASEL_TL_CUST_MTH_POSTN_SUM 
+	where mth_tm_id = &mth_tm_id 
+	group by basel_cust_id) INVSTM_ACCT_AMT
+ON ACCT.PRIM_BASEL_CUST_ID = INVSTM_ACCT_AMT.BASEL_CUST_ID
+
+LEFT JOIN
+(select prim_basel_cust_id, max(bns_dlqnt_day) AS BNS_DLQNT_DAY_MAX6M
+from
+	(select distinct mth_tm_id, basel_acct_id, prim_basel_cust_id, max(0,BNS_DLQNT_DAY-30) bns_dlqnt_day
+	from &net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT
+	where mth_tm_id >= &mth_tm_id-200 and mth_tm_id <= &mth_tm_id)
+ group by prim_basel_cust_id) BNS_DLQNT_DAY_MAX6M
+ON ACCT.PRIM_BASEL_CUST_ID = BNS_DLQNT_DAY_MAX6M.PRIM_BASEL_CUST_ID
+
+/*Delinquent*/
+LEFT JOIN
+	(select basel_cust_id, min(SATFCTRY_TRADE_GT_3_MTH_CNT ) as AT23_MIN6M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-200 and mth_tm_id <= &mth_tm_id
+	group by basel_cust_id) AT23_MIN6M
+ON ACCT.PRIM_BASEL_CUST_ID = AT23_MIN6M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, max(TRADE_90_DPD_LAST_24_MTH_CNT) as AT83_MAX3M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-80 and mth_tm_id <= &mth_tm_id
+	group by basel_cust_id) AT83_MAX3M
+ON ACCT.PRIM_BASEL_CUST_ID = AT83_MAX3M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, max(INQRY_PAST_6_MTH_CNT) as GO06_MAX3M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-80 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) GO06_MAX3M
+ON ACCT.PRIM_BASEL_CUST_ID = GO06_MAX3M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, avg(TOT_BAL_TP_BANKCARD_AMT ) as BC33_AVG6M 
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-200 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) BC33_AVG6M 
+ON ACCT.PRIM_BASEL_CUST_ID = BC33_AVG6M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, SUM(D2D_BAL_AMT) as D2D_BAL_AMT_INV
+	from &net_db..BASEL_TL_CUST_MTH_POSTN_SUM 
+	where mth_tm_id = &mth_tm_id 
+	group by basel_cust_id) D2D_BAL_AMT_INV
+ON ACCT.PRIM_BASEL_CUST_ID = D2D_BAL_AMT_INV.BASEL_CUST_ID
+
+LEFT JOIN
+	(SELECT A.PRIM_BASEL_CUST_ID
+       ,((ATAN(A.TOT_UNPAID_FNCL_CHRG_AMTT_OBS/&TOT_UNP_FNC_CHRG))/&PI+0.5)/ 
+         ((ATAN(B.TOT_UNPAID_FNCL_CHRG_AMT_12MAGO/&TOT_UNP_FNC_CHRG))/&PI+0.5) - 1 
+		AS TOT_UNP_FNC_CHRG_12M 
+	FROM
+		(SELECT PRIM_BASEL_CUST_ID, SUM(TOT_UNPAID_FNCL_CHRG_AMT) AS TOT_UNPAID_FNCL_CHRG_AMTT_OBS
+		FROM &net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT
+		WHERE MTH_TM_ID=&mth_tm_id  
+		GROUP BY PRIM_BASEL_CUST_ID) A
+		,
+		(SELECT PRIM_BASEL_CUST_ID, SUM(TOT_UNPAID_FNCL_CHRG_AMT) AS TOT_UNPAID_FNCL_CHRG_AMT_12MAGO
+		FROM &net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT
+		WHERE MTH_TM_ID=&mth_tm_id -440 
+		GROUP BY PRIM_BASEL_CUST_ID) B
+	WHERE A.PRIM_BASEL_CUST_ID=B.PRIM_BASEL_CUST_ID ) TOT_UNP_FNC_CHRG_12M 
+ON ACCT.PRIM_BASEL_CUST_ID = TOT_UNP_FNC_CHRG_12M.PRIM_BASEL_CUST_ID
+
+/*LGDD*/
+LEFT JOIN
+	(select basel_cust_id, sum(TOT_PD_AMT) as AT84_SUM12M  
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-440 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) AT84_SUM12M  
+ON ACCT.PRIM_BASEL_CUST_ID = AT84_SUM12M.BASEL_CUST_ID
+
+/*LGD-ND*/
+LEFT JOIN
+	(select basel_cust_id, avg(ACTV_INSTLMNT_TRDS_BAL_GT_ZERO_CNT) as AT29_AVG6M   
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-200 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) AT29_AVG6M   
+ON ACCT.PRIM_BASEL_CUST_ID = AT29_AVG6M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select distinct basel_cust_id, TM_30_DAY_PD_LAST_12_MTH_CNT as AT41  
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id = &mth_tm_id ) AT41   
+ON ACCT.PRIM_BASEL_CUST_ID = AT41.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, MAX(TOT_BAL_TP_BANKCARD_AMT ) as BC33_MAX6M 
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-200 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) BC33_MAX6M 
+ON ACCT.PRIM_BASEL_CUST_ID = BC33_MAX6M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, avg(TRADE_NEVER_DLQNT_PC) as GO11_AVG24M   
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-(40*23) and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) GO11_AVG24M   
+ON ACCT.PRIM_BASEL_CUST_ID = GO11_AVG24M.BASEL_CUST_ID
+
+LEFT JOIN
+(select prim_basel_cust_id, max(bns_dlqnt_day) AS BNS_DLQNT_DAY_GP_KSCMAX24M
+from
+	(select distinct mth_tm_id, basel_acct_id, prim_basel_cust_id, max(0,BNS_DLQNT_DAY-30) bns_dlqnt_day
+	from &net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT
+	where mth_tm_id >= &mth_tm_id-(40*23) and mth_tm_id <= &mth_tm_id)
+ group by prim_basel_cust_id) BNS_DLQNT_DAY_MAX24M
+ON ACCT.PRIM_BASEL_CUST_ID = BNS_DLQNT_DAY_MAX24M.PRIM_BASEL_CUST_ID
+
+LEFT JOIN
+(Select PRIM_BASEL_CUST_ID as BASEL_CUST_ID, avg(KSCAVG12M_2) as KSCAVG12M 
+from 
+	(SELECT PRIM_BASEL_CUST_ID, MTH_TM_ID, sum(BAL_HIST_CSH_ADV_AMT) as KSCAVG12M_2 
+	FROM &net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT 
+	WHERE MTH_TM_ID BETWEEN (&MTH_TM_ID.-40*11) AND &MTH_TM_ID.
+	GROUP BY PRIM_BASEL_CUST_ID, MTH_TM_ID) 
+GROUP BY PRIM_BASEL_CUST_ID)KSCAVG12M 
+on ACCT.PRIM_BASEL_CUST_ID=KSCAVG12M.BASEL_CUST_ID
+
+/*EAD*/
+LEFT JOIN
+	(select distinct basel_cust_id, OVDR_CNT as OVDR_CNT_SVG
+	from &net_db..BASEL_TL_CUST_MTH_DEP_TXN_SUM
+	where mth_tm_id = &mth_tm_id ) OVDR_CNT_SVG
+ON ACCT.PRIM_BASEL_CUST_ID = OVDR_CNT_SVG.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, max(INQRY_CNT) as GO04_MAX24M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &mth_tm_id-920 and mth_tm_id <= &mth_tm_id 
+	group by basel_cust_id) GO04_MAX24M
+ON ACCT.PRIM_BASEL_CUST_ID = GO04_MAX24M.BASEL_CUST_ID
+
+LEFT JOIN
+	(SELECT 
+    BASEL_CUST_ID,
+    MAX(MTH_SINCE_MOST_RECNT_TRADE_OPND_CNT) AS AT21_MAX6M
+	FROM 
+	    &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT
+	WHERE 
+	    MTH_TM_ID BETWEEN (&MTH_TM_ID. - 200) AND &MTH_TM_ID.
+	GROUP BY 
+	    BASEL_CUST_ID) AT21_MAX6M
+	ON ACCT.PRIM_BASEL_CUST_ID = AT21_MAX6M.BASEL_CUST_ID
+
+LEFT JOIN
+(SELECT PRIM_BASEL_CUST_ID,MAX(PRCH_CRNT_C_BAL_KSCMAX3M) AS PRCH_CRNT_C_BAL_KSCMAX3M FROM
+	(SELECT
+		PRIM_BASEL_CUST_ID,MTH_TM_ID,
+		SUM(PRCH_CRNT_CYCL_BAL_AMT) AS PRCH_CRNT_C_BAL_KSCMAX3M
+	FROM
+		&net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT
+	WHERE
+		MTH_TM_ID BETWEEN (&MTH_TM_ID.- 80)
+		AND &MTH_TM_ID.
+	GROUP BY
+		PRIM_BASEL_CUST_ID,MTH_TM_ID)
+	GROUP BY PRIM_BASEL_CUST_ID
+) PRCH_CRNT_C_BAL_KSCMAX3M ON ACCT.PRIM_BASEL_CUST_ID = PRCH_CRNT_C_BAL_KSCMAX3M.PRIM_BASEL_CUST_ID
+
+LEFT JOIN
+(SELECT
+	t1.*,
+	COALESCE(t2.MAX_DLQNT_DAY_24M_KS,
+	0) MAX_DLQNT_DAY_24M_KS,
+	COALESCE(t3.MAX_DLQNT_DAY_24M_SPL,
+	0) MAX_DLQNT_DAY_24M_SPL,
+	COALESCE(t4.MAX_DLQNT_DAY_24M_MOR,
+	0) MAX_DLQNT_DAY_24M_MOR,
+	MAX(COALESCE(t2.MAX_DLQNT_DAY_24M_KS, 0), COALESCE(t3.MAX_DLQNT_DAY_24M_SPL, 0), COALESCE(t4.MAX_DLQNT_DAY_24M_MOR, 0)) AS MAX_DLQNT_DAY_24M
+FROM
+	(
+	/*CC Population*/
+	SELECT
+		DISTINCT MTH_TM_ID,
+		BASEL_CUST_ID
+	FROM
+		&NET_DB..BASEL_REVLVNG_CR_BASE_DRVD_VARS
+	WHERE
+		BASEL_PRD_CD = 'CC'
+		AND HELOC_F = 'N'
+		AND BASEL_CUST_ID>1 AND MTH_TM_ID = &MTH_TM_ID.) t1
+LEFT JOIN (
+	/*KS*/
+	SELECT
+		MTH_TM_ID,
+		PRIM_BASEL_CUST_ID,
+		MAX(MAX_DLQNT_DAY_24M_KS) AS MAX_DLQNT_DAY_24M_KS
+	FROM
+		(WITH BASE_KS AS (
+		SELECT
+			MTH_TM_ID,
+			BASEL_ACCT_ID,
+			PRIM_BASEL_CUST_ID,
+			COALESCE(
+			(
+				CASE WHEN BNS_DLQNT_DAY < 0 THEN 0
+				WHEN BNS_DLQNT_DAY >= 0
+				AND BNS_DLQNT_DAY<31 THEN 0
+				WHEN BNS_DLQNT_DAY >= 31 THEN BNS_DLQNT_DAY - 30
+		END),
+			0) AS BNS_DLQNT_DAY
+		FROM
+			&NET_DB..BASEL_REVLVNG_CR_MTH_SNAPSHOT
+		WHERE
+			PRIM_BASEL_CUST_ID>1
+			AND MTH_TM_ID BETWEEN &MTH_TM_ID.-920 AND &MTH_TM_ID.),
+		MAX_DELINQUENCY_KS AS (
+		SELECT
+			BASEL_ACCT_ID,
+			PRIM_BASEL_CUST_ID,
+			MTH_TM_ID,
+			MAX(BNS_DLQNT_DAY) OVER (PARTITION BY BASEL_ACCT_ID, PRIM_BASEL_CUST_ID
+		ORDER BY
+			MTH_TM_ID ROWS BETWEEN 23 PRECEDING AND CURRENT ROW) AS MAX_DLQNT_DAY_24M_KS
+		FROM
+			BASE_KS)
+		SELECT
+			t1.*,
+			t2.MAX_DLQNT_DAY_24M_KS
+		FROM
+			BASE_KS t1
+		LEFT JOIN MAX_DELINQUENCY_KS t2 ON
+			t1.MTH_TM_ID = t2.MTH_TM_ID
+			AND t1.BASEL_ACCT_ID = t2.BASEL_ACCT_ID
+			AND T1.PRIM_BASEL_CUST_ID = T2.PRIM_BASEL_CUST_ID
+			AND T1.MTH_TM_ID = &MTH_TM_ID.)
+	GROUP BY
+		MTH_TM_ID,
+		PRIM_BASEL_CUST_ID) t2 ON
+	t1.MTH_TM_ID = t2.MTH_TM_ID
+	AND t1.BASEL_CUST_ID = t2.PRIM_BASEL_CUST_ID
+LEFT JOIN (
+	/*SPL*/
+	SELECT
+		MTH_TM_ID,
+		PRIM_BASEL_CUST_ID,
+		MAX(MAX_DLQNT_DAY_24M_SPL) AS MAX_DLQNT_DAY_24M_SPL
+	FROM
+		(WITH BASE_SPL AS (
+		SELECT
+			MTH_TM_ID,
+			BASEL_ACCT_ID,
+			PRIM_BASEL_CUST_ID,
+			TOT_CRNT_BAL_AMT,
+			COALESCE(DAY_ODUE,
+			0) AS DAY_ODUE
+		FROM
+			&NET_DB..BASEL_PSNL_LOAN_MTH_SNAPSHOT
+		WHERE
+			TOT_CRNT_BAL_AMT>0
+			AND PRIM_BASEL_CUST_ID>1
+			AND MTH_TM_ID BETWEEN &MTH_TM_ID.-920 AND &MTH_TM_ID.),
+		MAX_DELINQUENCY_SPL AS (
+		SELECT
+			BASEL_ACCT_ID,
+			PRIM_BASEL_CUST_ID,
+			MTH_TM_ID,
+			MAX(DAY_ODUE) OVER (PARTITION BY BASEL_ACCT_ID, PRIM_BASEL_CUST_ID
+		ORDER BY
+			MTH_TM_ID ROWS BETWEEN 23 PRECEDING AND CURRENT ROW) AS MAX_DLQNT_DAY_24M_SPL
+		FROM
+			BASE_SPL)
+		SELECT
+			t1.*,
+			t2.MAX_DLQNT_DAY_24M_SPL
+		FROM
+			BASE_SPL t1
+		LEFT JOIN MAX_DELINQUENCY_SPL t2 ON
+			t1.MTH_TM_ID = t2.MTH_TM_ID
+			AND t1.BASEL_ACCT_ID = t2.BASEL_ACCT_ID
+			AND T1.PRIM_BASEL_CUST_ID = T2.PRIM_BASEL_CUST_ID
+			AND T1.MTH_TM_ID = &MTH_TM_ID.)
+	GROUP BY
+		MTH_TM_ID,
+		PRIM_BASEL_CUST_ID) t3 ON
+	t1.MTH_TM_ID = t3.MTH_TM_ID
+	AND t1.BASEL_CUST_ID = t3.PRIM_BASEL_CUST_ID
+LEFT JOIN (
+	/*Mortgage*/
+	SELECT
+		MTH_TM_ID,
+		PRIM_BASEL_CUST_ID,
+		MAX(MAX_DLQNT_DAY_24M_MOR) AS MAX_DLQNT_DAY_24M_MOR
+	FROM
+		(WITH BASE_MOR AS (
+		SELECT
+			T1.TM_ID AS MTH_TM_ID,
+			t2.BASEL_ACCT_ID,
+			T2.PRIM_BASEL_CUST_ID,
+			T1.COMM_TP,
+			T1.CRNT_BAL,
+			T1.PD_OFF_F,
+			COALESCE(DLQNT_DAY,
+			0) AS DLQNT_DAY
+		FROM
+			&FRG_DB..AIRB_MORT_MTH_SNAPSHOT T1
+		LEFT JOIN &NET_DB..BASEL_MORT_MTH_SNAPSHOT T2 ON
+			T1.MORT_NUM = T2.MORT_NUM
+			AND T1.TM_ID = T2.MTH_TM_ID
+		WHERE
+			UPPER(TRIM(T1.COMM_TP))= 'RESIDENTIAL'
+			AND T1.CRNT_BAL>0
+			AND TRIM(T1.PD_OFF_F)= 'N'
+			AND T2.PRIM_BASEL_CUST_ID>1
+			AND T1.TM_ID BETWEEN &MTH_TM_ID.-920 AND &MTH_TM_ID.),
+		MAX_DELINQUENCY_MOR AS (
+		SELECT
+			BASEL_ACCT_ID,
+			PRIM_BASEL_CUST_ID,
+			MTH_TM_ID,
+			MAX(DLQNT_DAY) OVER (PARTITION BY BASEL_ACCT_ID, PRIM_BASEL_CUST_ID
+		ORDER BY
+			MTH_TM_ID ROWS BETWEEN 23 PRECEDING AND CURRENT ROW) AS MAX_DLQNT_DAY_24M_MOR
+		FROM
+			BASE_MOR)
+		SELECT
+			t1.*,
+			t2.MAX_DLQNT_DAY_24M_MOR
+		FROM
+			BASE_MOR t1
+		LEFT JOIN MAX_DELINQUENCY_MOR t2 ON
+			t1.MTH_TM_ID = t2.MTH_TM_ID
+			AND t1.BASEL_ACCT_ID = t2.BASEL_ACCT_ID
+			AND T1.PRIM_BASEL_CUST_ID = T2.PRIM_BASEL_CUST_ID
+			AND T1.MTH_TM_ID = &MTH_TM_ID.)
+	GROUP BY
+		MTH_TM_ID,
+		PRIM_BASEL_CUST_ID) t4 ON
+	t1.MTH_TM_ID = t4.MTH_TM_ID
+	AND t1.BASEL_CUST_ID = t4.PRIM_BASEL_CUST_ID) HGST_DLQNT_DAY_COMBMAX24M
+ON ACCT.PRIM_BASEL_CUST_ID = HGST_DLQNT_DAY_COMBMAX24M.BASEL_CUST_ID
+
+LEFT JOIN
+	(select basel_cust_id, max(MAX_REVLVNG_CR_CRNT_UTLTN_AMT) as BR147_MAX6M
+	from &net_db..CR_BUREAU_DELI_MTH_SNAPSHOT 
+	where mth_tm_id >= &MTH_TM_ID.-200 and mth_tm_id <= &MTH_TM_ID. 
+	group by basel_cust_id) BR147_MAX6M
+ON ACCT.PRIM_BASEL_CUST_ID = BR147_MAX6M.BASEL_CUST_ID
+) BY NZCON;
+QUIT;

@@ -1,0 +1,18 @@
+mode: Mainline
+tag-prefix: '[vV]'
+commit-message-incrementing: MergeMessageOnly
+branches:
+  feature:
+    regex: ^features?[/-]
+    source-branches: ['develop']
+  release:
+    increment: Minor
+    regex: ^releases?[/-]
+  develop:
+    tag: ''
+    is-mainline: true
+    increment: Patch
+    regex: ^dev(elop)?(ment)?$
+  main:
+    regex: ^main$
+

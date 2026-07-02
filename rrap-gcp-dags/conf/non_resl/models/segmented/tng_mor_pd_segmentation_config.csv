@@ -1,0 +1,11 @@
+﻿Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,TNG_PIT_STATUS_CD,Output
+Special Segment,>=0,,CLO,99
+Special Segment,,<0,CLO,99
+Special Segment,,,CLO,99
+DEF,>=0,,DEF,99
+DEF,,<0,DEF,99
+DEF,,,DEF,99
+<757,,< 757,,4
+"[757, 801)",>= 757,< 801,,3
+"[801, 842.5)",>= 801,< 842.5,,2
+>= 842.5,>= 842.5,,,1

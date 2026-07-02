@@ -1,0 +1,438 @@
+from airflow.sdk import get_current_context
+from bns.rrap.helpers.asset_event import _pull_asset_event_extras, _push_asset_event_extras
+
+UPSTREAM_ASSET = [
+    'ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT',
+    'reference.SRC_PRD_LKP',
+    'ingestion.MORT_MTH_SNAPSHOT',
+    'features.PIT_STATUS_CROSS_DEFAULT_GCP',
+    'ingestion.BASEL_ACCT_DIM',
+    'ingestion.TNG_ACCT_MO',
+    'features.TNG_FINAL_DEFAULT_IND',
+    'ingestion.TM_DIM',
+    "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
+]
+DOWNSTREAM_ASSET = 'features.MONTH_DEF_SINCE_LAST_DEF'
+DEPENDENCIES = {
+    'duckdb_delete': [
+        'export_account_buckets',
+        'export_mor',
+        'export_tng',
+        'export_spl',
+    ],
+    'export_account_buckets': [
+        'export_ks_batch_1',
+        'export_ks_batch_2',
+        'export_ks_batch_3',
+        'export_ks_batch_4',
+        'export_ks_batch_5',
+        'export_ks_batch_6',
+    ],
+    'export_ks_batch_1': ['duckdb_load'],
+    'export_ks_batch_2': ['duckdb_load'],
+    'export_ks_batch_3': ['duckdb_load'],
+    'export_ks_batch_4': ['duckdb_load'],
+    'export_ks_batch_5': ['duckdb_load'],
+    'export_ks_batch_6': ['duckdb_load'],
+    'export_mor': ['duckdb_load'],
+    'export_tng': ['duckdb_load'],
+    'export_spl': ['duckdb_load'],
+}
+
+
+RENDER_SQL="""
+WITH
+params AS (
+    SELECT
+        DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' AS run_dt,
+        REPLACE_COUNT AS batch_count,
+        REPLACE_ID AS batch_id
+),
+batch_accounts AS MATERIALIZED (
+    SELECT
+        B.BASEL_ACCT_ID
+    FROM '{{ task_instance.xcom_pull(task_ids="derived__month_def_since_last_def.export_account_buckets", key="parquet") }}' B
+    CROSS JOIN params P
+    WHERE
+        B.RUN_DT = P.run_dt
+        AND B.BATCH_COUNT = P.batch_count
+        AND B.BATCH_ID = P.batch_id
+),
+source AS MATERIALIZED (
+    SELECT
+        TM.TM_LVL_END_DT AS OBSN_DT,
+        RSN.BASEL_ACCT_ID,
+        TRIM(PIT.PIT_STATUS_CROSS_DEFAULT_GCP) AS PIT_STATUS
+    FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT RSN
+    INNER JOIN reference.SRC_PRD_LKP LKP ON
+        TRIM(RSN.PRD_CD) = TRIM(LKP.SRC_PRD_CD)
+        AND TRIM(RSN.SUB_PRD_CD) = TRIM(LKP.SRC_SUB_PRD_CD)
+        AND TRIM(LKP.PRD_SYS_CD) = 'KS'
+        AND TRIM(LKP.SML_BUS_F) = 'N'
+        AND TRIM(LKP.CRNT_F) = 'Y'
+    INNER JOIN ingestion.TM_DIM TM ON
+        TRIM(UPPER(TM.TM_LVL)) = 'MONTH'
+        AND RSN.MTH_TM_ID = TM.TM_ID
+    INNER JOIN batch_accounts BA ON
+        RSN.BASEL_ACCT_ID = BA.BASEL_ACCT_ID
+    LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_GCP PIT ON
+        RSN.BASEL_ACCT_ID = PIT.BASEL_ACCT_ID
+        AND TM.TM_LVL_END_DT = PIT.OBSN_DT
+),
+last_non_def AS (
+    SELECT
+        S.BASEL_ACCT_ID,
+        MAX(S.OBSN_DT) AS LAST_NON_DEF_OBSN_DT
+    FROM source S
+    CROSS JOIN params P
+    WHERE
+        S.OBSN_DT < P.run_dt
+        AND (S.PIT_STATUS IS NULL OR S.PIT_STATUS NOT IN ('DEF','CHG'))
+    GROUP BY S.BASEL_ACCT_ID
+),
+tmp AS (
+    SELECT
+        S.BASEL_ACCT_ID,
+        COUNT(*) AS CONS_DFT_MTH_CNT
+    FROM source S
+    CROSS JOIN params P
+    LEFT JOIN last_non_def L ON
+        S.BASEL_ACCT_ID = L.BASEL_ACCT_ID
+    WHERE
+        S.OBSN_DT < P.run_dt
+        AND S.PIT_STATUS IN ('DEF','CHG')
+        AND (
+            L.LAST_NON_DEF_OBSN_DT IS NULL
+            OR S.OBSN_DT > L.LAST_NON_DEF_OBSN_DT
+        )
+    GROUP BY S.BASEL_ACCT_ID
+)
+SELECT
+    P.run_dt AS OBSN_DT,
+    S.BASEL_ACCT_ID,
+    CASE
+        WHEN S.PIT_STATUS IN ('DEF', 'CHG') THEN COALESCE(TMP.CONS_DFT_MTH_CNT, 0)
+        ELSE NULL
+    END AS MONTH_DEF_SINCE_LAST_DEF,
+    'KS' AS SRC_SYS_CD
+FROM source S
+CROSS JOIN params P
+LEFT JOIN tmp TMP ON
+    S.BASEL_ACCT_ID = TMP.BASEL_ACCT_ID
+WHERE S.OBSN_DT = P.run_dt
+"""
+
+
+def duckdb_delete(
+    duckdb_conn_id='duckdb-conn',
+    sql=rf"""
+        DELETE FROM {DOWNSTREAM_ASSET}
+        WHERE OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+    """
+):
+    pass
+
+
+# FIXME
+# This whole section is a kludge stopgap because export_ks was running so long
+# But breaking it down into manageable chunks for 16GB and 4 threads is more reasonable
+# Can't used Airflow Mapped Tasks to do this programmatically because of the 
+#  dynamic dag generator setup, needs to be fixed once we convert to materializing 
+#  dags on deployment
+# The ideal solution would be to have a Python task that creates the list of batch_id's
+#  to iterate over and the subsequent task is a .expand call which creates a Mapped Task
+#  per batch_id and renders the SQL with the batch_id replaced in the params CTE
+def export_account_buckets(
+    duckdb_conn_id='duckdb-conn',
+    sql=f"""
+    WITH _bucket_params AS (
+        SELECT 
+            DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS run_dt,
+            6 AS batch_count,
+            0 AS batch_id
+    )
+    SELECT DISTINCT
+        (SELECT run_dt FROM _bucket_params) AS RUN_DT,
+        (SELECT batch_count FROM _bucket_params) AS BATCH_COUNT,
+        MOD(HASH(RSN.BASEL_ACCT_ID), (SELECT batch_count FROM _bucket_params)) AS BATCH_ID,
+        RSN.BASEL_ACCT_ID
+    FROM {UPSTREAM_ASSET[0]} RSN
+    INNER JOIN {UPSTREAM_ASSET[1]} LKP ON
+        TRIM(RSN.PRD_CD) = TRIM(LKP.SRC_PRD_CD)
+        AND TRIM(RSN.SUB_PRD_CD) = TRIM(LKP.SRC_SUB_PRD_CD)
+        AND TRIM(LKP.PRD_SYS_CD) = 'KS'
+        AND TRIM(LKP.SML_BUS_F) = 'N'
+        AND TRIM(LKP.CRNT_F) = 'Y'
+    INNER JOIN {UPSTREAM_ASSET[7]} TM ON
+        TRIM(UPPER(TM.TM_LVL)) = 'MONTH'
+        AND RSN.MTH_TM_ID = TM.TM_ID
+    WHERE TM.TM_LVL_END_DT = (SELECT run_dt FROM _bucket_params)
+    """,
+):
+    pass
+
+
+def export_ks_batch_1(
+    duckdb_conn_id='duckdb-conn',
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "0"),
+):
+    pass
+
+
+def export_ks_batch_2(
+    duckdb_conn_id='duckdb-conn',
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "1"),
+):
+    pass
+
+
+def export_ks_batch_3(
+    duckdb_conn_id='duckdb-conn',
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "2"),
+):
+    pass
+
+
+def export_ks_batch_4(
+    duckdb_conn_id='duckdb-conn',
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "3"),
+):
+    pass
+
+
+def export_ks_batch_5(
+    duckdb_conn_id='duckdb-conn',
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "4"),
+):
+    pass
+
+
+def export_ks_batch_6(
+    duckdb_conn_id='duckdb-conn',
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "5"),
+):
+    pass
+
+
+def export_mor(
+    duckdb_conn_id='duckdb-conn',
+    resource_tier='HIGH',
+    pool_slots=96,
+    sql=f"""
+    WITH source AS (
+        SELECT
+            PIT.BASEL_ACCT_ID,
+            MORT.MTH_TM_ID,
+            TRIM(PIT.PIT_STATUS_CROSS_DEFAULT_GCP) AS PIT_STATUS
+        FROM {UPSTREAM_ASSET[3]} PIT
+        INNER JOIN {UPSTREAM_ASSET[7]} TM ON
+            TRIM(UPPER(TM.TM_LVL)) = 'MONTH'
+            AND PIT.OBSN_DT = TM.TM_LVL_END_DT
+        INNER JOIN {UPSTREAM_ASSET[2]} MORT ON
+            PIT.BASEL_ACCT_ID = MORT.BASEL_ACCT_ID
+            AND TM.TM_ID = MORT.MTH_TM_ID
+    ),
+    def_block AS (
+        SELECT BASEL_ACCT_ID, COUNT(*) AS CONS_COUNT
+        FROM (
+            SELECT
+                BASEL_ACCT_ID,
+                PIT_STATUS,
+                MTH_TM_ID,
+                CASE WHEN PIT_STATUS IN ('DEF','CHG') THEN 1 ELSE 0 END AS IS_DEF,
+                SUM(CASE WHEN PIT_STATUS IN ('CUR','CLO') OR PIT_STATUS IS NULL THEN 1 ELSE 0 END)
+                OVER (PARTITION BY BASEL_ACCT_ID ORDER BY MTH_TM_ID DESC ROWS UNBOUNDED PRECEDING) AS BREAK_AFTER
+            FROM source
+            WHERE MTH_TM_ID < {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+        ) sub
+        WHERE IS_DEF = 1 AND BREAK_AFTER = 0
+        GROUP BY BASEL_ACCT_ID
+    ),
+    final AS (
+        SELECT
+            s.BASEL_ACCT_ID,
+            s.MTH_TM_ID,
+            s.PIT_STATUS,
+            CASE
+                WHEN s.MTH_TM_ID != {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} THEN NULL
+                WHEN s.PIT_STATUS IS NULL THEN NULL
+                WHEN s.PIT_STATUS IN ('DEF','CHG') THEN COALESCE(db.CONS_COUNT, 0)
+                WHEN s.PIT_STATUS = 'CUR' THEN NULL
+                ELSE NULL
+            END AS MONTH_DEF_SINCE_LAST_DEF
+        FROM source s
+        LEFT JOIN def_block db ON s.BASEL_ACCT_ID = db.BASEL_ACCT_ID
+    )
+    SELECT
+        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+        BASEL_ACCT_ID,
+        MONTH_DEF_SINCE_LAST_DEF,
+        'MOR' AS SRC_SYS_CD
+    FROM final
+    WHERE
+        MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+    """
+):
+    pass
+
+
+def export_spl(
+    duckdb_conn_id='duckdb-conn',
+    sql=f"""
+        WITH source AS (
+        SELECT
+            PIT.BASEL_ACCT_ID,
+            PSNL.MTH_TM_ID,
+            TRIM(PIT.PIT_STATUS_CROSS_DEFAULT_GCP) AS PIT_STATUS
+        FROM {UPSTREAM_ASSET[3]} PIT
+        INNER JOIN {UPSTREAM_ASSET[7]} TM ON
+            TRIM(UPPER(TM.TM_LVL)) = 'MONTH'
+            AND PIT.OBSN_DT = TM.TM_LVL_END_DT
+        INNER JOIN {UPSTREAM_ASSET[8]} PSNL ON
+            PIT.BASEL_ACCT_ID = PSNL.BASEL_ACCT_ID
+            AND TM.TM_ID = PSNL.MTH_TM_ID
+        ),
+        def_block AS (
+            SELECT BASEL_ACCT_ID, COUNT(*) AS CONS_COUNT
+            FROM (
+                SELECT
+                    BASEL_ACCT_ID,
+                    PIT_STATUS,
+                    MTH_TM_ID,
+                    CASE WHEN PIT_STATUS IN ('DEF','CHG') THEN 1 ELSE 0 END AS IS_DEF,
+                    SUM(CASE WHEN PIT_STATUS IN ('CUR','CLO') OR PIT_STATUS IS NULL THEN 1 ELSE 0 END)
+                    OVER (PARTITION BY BASEL_ACCT_ID ORDER BY MTH_TM_ID DESC ROWS UNBOUNDED PRECEDING) AS BREAK_AFTER
+                FROM source
+                WHERE MTH_TM_ID < {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+            ) sub
+            WHERE IS_DEF = 1 AND BREAK_AFTER = 0
+            GROUP BY BASEL_ACCT_ID
+        ),
+        final AS (
+            SELECT
+                s.BASEL_ACCT_ID,
+                s.MTH_TM_ID,
+                s.PIT_STATUS,
+                CASE
+                    WHEN s.MTH_TM_ID != {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} THEN NULL
+                    WHEN s.PIT_STATUS IS NULL THEN NULL
+                    WHEN s.PIT_STATUS IN ('DEF','CHG') THEN COALESCE(db.CONS_COUNT, 0)
+                    WHEN s.PIT_STATUS = 'CUR' THEN NULL
+                    ELSE NULL
+                END AS MONTH_DEF_SINCE_LAST_DEF
+            FROM source s
+            LEFT JOIN def_block db ON s.BASEL_ACCT_ID = db.BASEL_ACCT_ID
+        )
+        SELECT
+            '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+            BASEL_ACCT_ID,
+            MONTH_DEF_SINCE_LAST_DEF,
+            'SPL' AS SRC_SYS_CD
+        FROM final
+        WHERE
+            MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+    """
+):
+    pass
+
+
+def export_tng(
+    duckdb_conn_id='duckdb-conn',
+    resource_tier='HIGH',
+    pool_slots=96,
+    sql=f"""
+    WITH
+    def AS (
+        SELECT
+            obsn_dt,
+            trim(account_id) account_id
+        FROM { UPSTREAM_ASSET[6] }
+        WHERE 1=1
+            AND tng_final_default_ind = 'Y'
+            AND obsn_dt = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+    )
+    , lag AS (
+        SELECT
+            a.obsn_dt,
+            trim(a.account_id) account_id,
+            a.tng_final_default_ind,
+            lag(a.tng_final_default_ind) OVER (PARTITION BY a.account_id ORDER BY a.obsn_dt) AS prev
+        FROM { UPSTREAM_ASSET[6] } a
+        INNER JOIN def b ON
+            trim(a.account_id) = trim(b.account_id)
+            AND a.obsn_dt <= b.obsn_dt
+            AND a.obsn_dt >= '2004-12-31'
+    )
+    , t AS (
+        SELECT
+            a.obsn_dt,
+            a.account_id,
+            DATE_DIFF('month', max(b.obsn_dt), a.obsn_dt) AS months_in_default
+        FROM def a
+        INNER JOIN lag b ON
+            a.account_id = b.account_id
+        WHERE
+            b.tng_final_default_ind = 'Y'
+            AND (
+                b.prev = 'N'
+                OR b.prev IS NULL
+            )
+        GROUP BY
+            a.obsn_dt,
+            a.account_id
+    )
+    SELECT
+        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+        b.basel_acct_id,
+        c.months_in_default as month_def_since_last_def,
+        b.src_app_cd as src_sys_cd
+    FROM { UPSTREAM_ASSET[5] } a
+    inner join { UPSTREAM_ASSET[4] } b on
+        b.src_app_cd ='TNG-MOR'
+        and b.src_sys_del_f != 'Y'
+        and trim(a.account_id) = trim(b.src_app_id)
+    LEFT OUTER JOIN t c ON
+        a.month_end_dt = c.obsn_dt
+        AND a.account_id = c.account_id
+    WHERE
+        a.month_end_dt = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+    """
+):
+    pass
+
+def duckdb_load(
+    duckdb_conn_id='duckdb-conn',
+    sql=f"""
+    INSERT INTO {DOWNSTREAM_ASSET} BY NAME
+    FROM (
+        SELECT OBSN_DT, BASEL_ACCT_ID, MONTH_DEF_SINCE_LAST_DEF, SRC_SYS_CD
+        FROM read_parquet('{{{{ task_instance.xcom_pull(task_ids="derived__month_def_since_last_def.export_ks_batch_1", key="parquet") }}}}')
+        UNION ALL
+        SELECT OBSN_DT, BASEL_ACCT_ID, MONTH_DEF_SINCE_LAST_DEF, SRC_SYS_CD
+        FROM read_parquet('{{{{ task_instance.xcom_pull(task_ids="derived__month_def_since_last_def.export_ks_batch_2", key="parquet") }}}}')
+        UNION ALL
+        SELECT OBSN_DT, BASEL_ACCT_ID, MONTH_DEF_SINCE_LAST_DEF, SRC_SYS_CD
+        FROM read_parquet('{{{{ task_instance.xcom_pull(task_ids="derived__month_def_since_last_def.export_ks_batch_3", key="parquet") }}}}')
+        UNION ALL
+        SELECT OBSN_DT, BASEL_ACCT_ID, MONTH_DEF_SINCE_LAST_DEF, SRC_SYS_CD
+        FROM read_parquet('{{{{ task_instance.xcom_pull(task_ids="derived__month_def_since_last_def.export_ks_batch_4", key="parquet") }}}}')
+        UNION ALL
+        SELECT OBSN_DT, BASEL_ACCT_ID, MONTH_DEF_SINCE_LAST_DEF, SRC_SYS_CD
+        FROM read_parquet('{{{{ task_instance.xcom_pull(task_ids="derived__month_def_since_last_def.export_ks_batch_5", key="parquet") }}}}')
+        UNION ALL
+        SELECT OBSN_DT, BASEL_ACCT_ID, MONTH_DEF_SINCE_LAST_DEF, SRC_SYS_CD
+        FROM read_parquet('{{{{ task_instance.xcom_pull(task_ids="derived__month_def_since_last_def.export_ks_batch_6", key="parquet") }}}}')
+        UNION ALL
+        SELECT OBSN_DT, BASEL_ACCT_ID, MONTH_DEF_SINCE_LAST_DEF, SRC_SYS_CD
+        FROM read_parquet('{{{{ task_instance.xcom_pull(task_ids="derived__month_def_since_last_def.export_mor", key="parquet") }}}}')
+        UNION ALL
+        SELECT OBSN_DT, BASEL_ACCT_ID, MONTH_DEF_SINCE_LAST_DEF, SRC_SYS_CD
+        FROM read_parquet('{{{{ task_instance.xcom_pull(task_ids="derived__month_def_since_last_def.export_spl", key="parquet") }}}}')
+        UNION ALL
+        SELECT OBSN_DT, BASEL_ACCT_ID, MONTH_DEF_SINCE_LAST_DEF, SRC_SYS_CD
+        FROM read_parquet('{{{{ task_instance.xcom_pull(task_ids="derived__month_def_since_last_def.export_tng", key="parquet") }}}}')
+    )
+    """
+):
+    pass
+

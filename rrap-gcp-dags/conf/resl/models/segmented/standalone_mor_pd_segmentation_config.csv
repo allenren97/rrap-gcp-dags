@@ -1,0 +1,8 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_ACCOUNT,MODEL_EXCL_F,WRITTEN_OUT_F,TOTAL_BALANCE,Output
+Special Segment,,,,Y,,,98
+Special Segment,,,,,Y,,98
+Special Segment,,,,,,<=0,98
+Special Segment,,,DEF,,,,99
+>1025,>1025,,,,,,1
+"(981, 1025] ",>981,<=1025,,,,,2
+<= 981,,<= 981,,,,,3

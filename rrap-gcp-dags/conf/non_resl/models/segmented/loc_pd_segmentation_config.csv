@@ -1,0 +1,18 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,BASEL_PRD_CD,PIT_STATUS_CROSS_DEFAULT_ORIG,CONSM_SCORECRD_EXCLSN_F,CONSM_PRD_TREATMNT_CD,TRNSCTR_IND,HELOC_F,Output
+>757.5,>757.5,,,CUR,N,A,N,,1
+"(730.5, 757.5]",>730.5,<=757.5,,CUR,N,A,N,,2
+"(717.5, 730.5]",>717.5,<=730.5,,CUR,N,A,N,,3
+"(699.5, 717.5]",>699.5,<=717.5,,CUR,N,A,N,,4
+"(687.5, 699.5]",>687.5,<=699.5,,CUR,N,A,N,,5
+"(654.5, 687.5]",>654.5,<=687.5,,CUR,N,A,N,,6
+"(618.5, 654.5]",>618.5,<=654.5,,CUR,N,A,N,,7
+<=618.5,,<=618.5,,CUR,N,A,N,,8
+Transactor,>0,,,CUR,N,A,T,,10
+Transactor,,<=0,,CUR,N,A,T,,10
+Transactor,,,,CUR,N,A,T,,10
+Special Segment,>0,,LOC,CUR,Y,A,,N,98
+Special Segment,,<=0,LOC,CUR,Y,A,,N,98
+Special Segment,,,LOC,CUR,Y,A,,N,98
+DEF,>0,,LOC,DEF,,A,,N,99
+DEF,,<=0,LOC,DEF,,A,,N,99
+DEF,,,LOC,DEF,,A,,N,99

@@ -1,0 +1,4 @@
+# Email List
+"RRAE_OPS@scotiabank.com" "edwsupport@scotiabank.com" "GRT-Model-Support@scotiabank.com"
+"RRAE_OPS@scotiabank.com" "edwsupport@scotiabank.com" "GRT-Model-Support@scotiabank.com"
+

@@ -1,0 +1,10 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_CROSS_DEFAULT_ORIG,MODEL_EXCL_F_V2,TREATMENT_F,PRD_ID,PRINCIPAL_BAL,OS_BAL_AMT_V2,MONTH_DEF_SINCE_LAST_DEF,Output
+<215,<215,,DEF,N,A,,,,,1
+"[215,358)",>=215,<358,DEF,N,A,,,,,2
+"[358,522)",>=358,<522,DEF,N,A,,,,,3
+"[522,645)",>= 522,<645,DEF,N,A,,,,,4
+>=645,>=645,,DEF,N,A,,,,,5
+Special Segment Small Balance,,,DEF,Y,A,,==0,,<=24,6
+Special Segment Small Balance,,,DEF,Y,A,,,<1,<=24,6
+Special Segment: Home Improvement & Other,,,DEF,Y,A,"IN ('S11', 'S14')",,,<=24,7
+Accounts defaulted more than 24 months,,,DEF,Y,A,,,,>24,8

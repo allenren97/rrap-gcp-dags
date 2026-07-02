@@ -1,0 +1,13 @@
+CREATE TABLE
+    IF NOT EXISTS features.CCF (
+        OBSN_DT DATE NOT NULL,
+        BASEL_ACCT_ID BIGINT NOT NULL,
+        SRC_SYS_CD VARCHAR,
+        CCF DECIMAL(18,3)
+    )
+;
+
+ALTER TABLE features.CCF
+SET
+    PARTITIONED BY (OBSN_DT)
+;

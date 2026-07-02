@@ -1,0 +1,23 @@
+﻿Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,INSURANCE,BULK_IND,TOTAL_BALANCE,MONTH_DEF_SINCE_LAST_DEF,CURRENT_BALANCE,TOTAL_SUSPENSE,FULL_PAID_OFF_F,PIT_STATUS_CROSS_DEFAULT_ORIG,Output
+( < 247 OR Missing ) AND  INSURANCE INDICATOR = 'UNINSURED',,<247,Uninsured,,,,,,,,1
+"[247, 496] AND  INSURANCE INDICATOR = 'UNINSURED'",>247,<=496,Uninsured,,,,,,,,2
+"[497, 647]  AND  INSURANCE INDICATOR = 'UNINSURED'",>497,<647,Uninsured,,,,,,,,3
+> 647 AND INSURANCE INDICATOR = 'UNINSURED',>647,,Uninsured,,,,,,,,4
+( < 247 OR Missing )  AND INSURANCE INDICATOR = 'INSURED' AND BULK_IND = 'N',,<247,Insured,N,,,,,,,5
+"[247, 496] AND INSURANCE INDICATOR = 'INSURED' AND BULK_IND = 'N'",>247,<=496,Insured,N,,,,,,,6
+"[497,647] AND  INSURANCE INDICATOR = 'INSURED' AND BULK_IND = 'N'",>497,<647,Insured,N,,,,,,,7
+> 647  AND INSURANCE INDICATOR = 'INSURED' AND BULK_IND = 'N',>647,,Insured,N,,,,,,,8
+( < 247 OR Missing )  AND INSURANCE INDICATOR = 'INSURED' AND BULK_IND = 'Y',,<247,Insured,Y,,,,,,,9
+"[247, 496] AND INSURANCE INDICATOR = 'INSURED' AND BULK_IND = 'Y'",>247,<=496,Insured,Y,,,,,,,10
+"[497, 647] AND INSURANCE INDICATOR = 'INSURED' AND BULK_IND = 'Y'",>497,<647,Insured,Y,,,,,,,11
+> 647 AND INSURANCE INDICATOR = 'INSURED' AND BULK_IND = 'Y',>647,,Insured,Y,,,,,,,12
+Total_Balance <= 5000 AND Month_Def < 24,>0,,,,<=5000,<24,,,,,13
+Total_Balance <= 5000 AND Month_Def < 24,,<=0,,,<=5000,<24,,,,,13
+Total_Balance <= 5000 AND Month_Def < 24,,,,,<=5000,<24,,,,,13
+Month_Def >= 24,,<0,,,,>=24,,,,,14
+Month_Def >= 24,>=0,,,,,>=24,,,,,14
+Month_Def >= 24,,,,,,>=24,,,,,14
+Special Segment,,,,,,,<=0,0,Y,,98
+Special Segment,,<0,,,,,,,,is None,98
+Special Segment,>=0,,,,,,,,,is None,98
+Special Segment,,,,,,,,,,is None,98

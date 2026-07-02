@@ -1,0 +1,5 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,BNS_DLQNT_DAY,MONTH_DEF, PIT_STAT_VER_2_CD,MODEL_EXCLUSION_F,Output
+Defaulted (>=120 days delinquent),,,>=120,<24,DEF,N,2
+Defaulted (>=120 days delinquent),,,,<24,DEF,N,2
+Defaulted (>=24 months delinquent),,,,>=24,DEF,N,90
+Special Segment,,,,,,Y,98

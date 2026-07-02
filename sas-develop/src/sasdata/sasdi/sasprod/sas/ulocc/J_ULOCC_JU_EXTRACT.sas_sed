@@ -1,0 +1,6 @@
+127s/^/ \/\* /; 127s/$/ \*\//;
+127a\
+ LIBNAME DB2ULCED DB2  Datasrc=DM1P1D user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)   SCHEMA=EDRTLRT  ;
+538s/^/ \/\* /; 538s/$/ \*\//;
+538a\
+          LIBNAME DB2ULCED DB2  Datasrc=DM1P1D user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)   SCHEMA=EDRTLRT  ;

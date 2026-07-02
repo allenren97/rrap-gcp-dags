@@ -1,0 +1,10 @@
+INSERT INTO AIRB_RECON.dbo.Online_Applications_Info VALUES (22,N'RECON_22',N'RECON_VIEW',N'N',N'Y',23,NULL);
+INSERT INTO AIRB_RECON.dbo.Online_Applications_Info VALUES (23,N'RECON_23',N'RECON_APPROVE',N'Y',N'Y',22,NULL);
+INSERT INTO AIRB_RECON.dbo.Online_Applications_Info VALUES (11,N'RECON_11',N'',N'N',N'N',NULL,N'not in use');
+INSERT INTO AIRB_RECON.dbo.Online_Applications_Info VALUES (12,N'RECON_12',N'RECON_NOTIFICATION',N'N',N'Y',NULL,NULL);
+INSERT INTO AIRB_RECON.dbo.Online_Applications_Info VALUES (16,N'RECON_16',N'',N'N',N'N',NULL,N'not in use');
+INSERT INTO AIRB_RECON.dbo.Online_Applications_Info VALUES (17,N'RECON_17',N'RECON_NOTIFICATION',N'N',N'Y',NULL,NULL);
+INSERT INTO AIRB_RECON.dbo.Online_Applications_Info VALUES (98,N'RECON_98',N'',N'N',N'N',NULL,N'not in use');
+INSERT INTO AIRB_RECON.dbo.Online_Applications_Info VALUES (99,N'RECON_99',N'RECON_NOTIFICATION',N'N',N'Y',NULL,NULL);
+INSERT INTO AIRB_RECON.dbo.Online_Applications_Info VALUES (97,N'RECON_97',N'',N'N',N'N',NULL,N'This role does not send any mail.');
+INSERT INTO AIRB_RECON.dbo.Online_Applications_Info VALUES (96,N'RECON_96',N'',N'N',N'N',NULL,N'not in use');

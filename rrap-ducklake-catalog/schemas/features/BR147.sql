@@ -1,0 +1,8 @@
+-- BR147 feature definition
+CREATE TABLE IF NOT EXISTS features.BR147 (
+    OBSN_DT DATE NOT NULL,
+    BASEL_CUST_ID BIGINT NOT NULL,
+    BR147 INTEGER
+);
+-- Set partitions 
+ALTER TABLE features.BR147 SET PARTITIONED BY (OBSN_DT);

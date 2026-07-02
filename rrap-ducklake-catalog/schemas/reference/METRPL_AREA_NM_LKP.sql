@@ -1,0 +1,11 @@
+-- PROV_COMP is PROV but if METRPL_AREA_NM is '11' or '6' 
+-- or PROV is NULL then PROV_COMP is 'COMPOSITE'
+
+CREATE TABLE
+    if NOT EXISTS reference.METRPL_AREA_NM_LKP (
+        METRPL_AREA_NM VARCHAR,
+        PROV VARCHAR,
+        METRPL_AREA_NM_CLEAN VARCHAR,
+        PROV_COMP VARCHAR
+    )
+;

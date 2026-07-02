@@ -1,0 +1,24 @@
+113s/^/ \/\* /; 113s/$/ \*\//;
+113a\
+ libname crdm  db2 dsn=DM1DBT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  schema=EDRTLR readbuff=30000 read_isolation_level=UR ;
+114s/^/ \/\* /; 114s/$/ \*\//;
+114a\
+ libname crdm_t  db2 dsn=DM1DBT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  schema=EDRTLRT readbuff=30000 ;
+115s/^/ \/\* /; 115s/$/ \*\//;
+115a\
+ libname p_edw db2 schema=EDEDW user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  datasrc=DM1DBT dbconinit="SET CURRENT DEGREE='ANY'" INSERT_SQL=YES readbuff=10000 INSERTBUFF=10000 read_isolation_level=UR ;
+116s/^/ \/\* /; 116s/$/ \*\//;
+116a\
+ libname p_rds db2 schema=EDRDS user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  datasrc=DM1DBT dbconinit="SET CURRENT DEGREE='ANY'" INSERT_SQL=YES readbuff=10000 INSERTBUFF=10000 read_isolation_level=UR ;
+117s/^/ \/\* /; 117s/$/ \*\//;
+117a\
+ libname p_edt db2 schema=EDEDT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  datasrc=OWSTAR dbconinit="SET CURRENT DEGREE='ANY'" INSERT_SQL=YES readbuff=10000 INSERTBUFF=10000 read_isolation_level=UR ;
+120s/^/ \/\* /; 120s/$/ \*\//;
+120a\
+ libname SAS db2 schema=EDRTLRMDT user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  datasrc=OWSTAR ;
+123s/^/ \/\* /; 123s/$/ \*\//;
+123a\
+ libname d_cr_tb db2 dsn=DM1P1D user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  schema=EDRTLRT readbuff=30000 ;
+124s/^/ \/\* /; 124s/$/ \*\//;
+124a\
+ libname d_cr_vw  db2 dsn=DM1P1D user=%sysget(DB2_USER) password=%sysget(DB2_USER_PASS)  schema=EDRTLR readbuff=30000 read_isolation_level=UR ;

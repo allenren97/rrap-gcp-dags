@@ -1,0 +1,887 @@
+/**************************************************************************** 
+* Job			: J_RRII_KS10_2108_BASEL_ANALYTICL_BL_INSTRMNT_FACT_KS_IFRS * 
+* Generated on	: Wednesday, November 30, 2022                          	* 
+* Created by	: Gaurav Tewari                                             * 
+* Version		: SAS Enerprise Guide										*	
+* PLease  DO NOT change MTH_TM_ID1 i.e. 16516 								*
+* Note          : Table created to mirror instrument fact for KS, pre
+                  BASEL III  for the EST team.
+* Updated on	:  					 				                        *
+* Updated by	:  										                 	*
+****************************************************************************/ 
+
+%put WORK LOCATION: %sysfunc(getoption(work));
+%include '/sasdata/sasdi/sasprod/macro/rrap_iias/rrap_iias_ifrs_autoexec.sas';
+%rrap_ifrs9_autoexec(ENV=PROD);
+%let MTH_TM_ID1=16516;
+DATA _NULL_;
+	CALL SYMPUTX('PROCESSSTARTTIME',PUT(DATETIME(),DATETIME25.0));
+RUN;
+%let TM_ID=&MTH_TM_ID.;
+
+
+
+
+ PROC SQL ;
+			CONNECT USING NZRRAP AS NZCON;
+     	       select 
+				TM_ID, put(tm_lvl_st_dt,date9.) as tm_lvl_st_dt , put(tm_lvl_end_dt,date9.) as tm_lvl_end_dt , yrm
+				into 	:TM_ID,:tm_lvl_st_dt, :tm_lvl_end_dt, :yearm 
+      	      from connection to NZCON
+				( 	select 	TM_ID,  tm_lvl_st_dt ,  tm_lvl_end_dt , substr(TM_LVL_ST_DT,1,4)||substr(TM_LVL_ST_DT,6,2) as yrm
+					from 	&net_db..TM_DIM
+					where tm_id = &MTH_TM_ID.		
+				);
+
+            disconnect from NZCON; 
+         quit;
+
+%Put Info: Curent MTH_TMID: 	&TM_ID Info: Period_Start_dt :		&tm_lvl_st_dt. Info: Period_End_dt :		&tm_lvl_end_dt. Info: Process Started at : &PROCESSSTARTTIME.;
+
+%let DM_SCH=&DBSCHEMA;
+%put DM_SCH=&DM_SCH;
+
+/****** Get data from DB2 tables **************/
+
+PROC SQL ;
+CONNECT USING DB2RRAP AS NZCON;
+ create table ORG_UNIT_HIERARCHY_DIM as
+    select *              
+    from connection to NZCON
+	( SELECT TRNST_NUM FROM EDEDW.ORG_UNIT_HIERARCHY_DIM
+		WHERE ( select 	tm_lvl_end_dt from 	EDEDW.TM_DIM where tm_id = &MTH_TM_ID.) BETWEEN EFF_FROM_TMSTMP AND EFF_TO_TMSTMP
+	);
+   
+ create table BASEL_CC_SEC_ACCT_MTH_SNAP as
+    select *              
+    from connection to NZCON
+	( SELECT a.BASEL_ACCT_ID_CCAR_MATCHED as BASEL_ACCT_ID_CCAR_MATCHED ,
+				a.SECRTZTN_TP_CD AS SECRTZTN_TP_CD  , 
+				SECRTZTN_OS_ADJ_FACTR as v_SECURITIZATION_FACTOR
+			FROM &DM_SCH..BASEL_CC_SEC_ACCT_MTH_SNAP a
+			left join &DM_SCH..BASEL_SEC_ADJ_FACTR_MTH_SNAP s on a.SECRTZTN_TP_CD=s.SECRTZTN_TP_CD
+						and s.mth_tm_id= a.MTH_TM_ID
+			WHERE a.BASEL_ACCT_ID_CCAR_MATCHED IS NOT NULL
+			AND a.MTH_TM_ID=&MTH_TM_ID.);
+
+create table BASEL_REVLVNG_CR_INSTRMNT_ADJ as
+    select *              
+    from connection to NZCON
+	( SELECT   ab.basel_acct_id,ab.AF_ADJ_OS_BAL_AMT AS AF_ADJ_OS_BAL_AMT,
+	round(ab.AF_ADJ_OS_BAL_AMT,8)	AS vADJUSTED_OS_BAL_AMT, 
+	(CASE WHEN round(ab.AF_ADJ_OS_BAL_AMT,8) < 0 THEN 0 ELSE round(ab.AF_ADJ_OS_BAL_AMT,8) END) AS AF_ZERO_NET_DRAWN_AMT
+              from (
+                select BASEL_REVLVNG_CR_INSTRMNT_ADJ.AF_ADJ_OS_BAL_AMT as AF_ADJ_OS_BAL_AMT, 
+			   		BASEL_REVLVNG_CR_INSTRMNT_ADJ.BASEL_ACCT_ID as BASEL_ACCT_ID 
+				FROM &DM_SCH..BASEL_REVLVNG_CR_INSTRMNT_ADJ BASEL_REVLVNG_CR_INSTRMNT_ADJ 
+				WHERE BASEL_REVLVNG_CR_INSTRMNT_ADJ.MTH_TM_ID=&MTH_TM_ID.)ab);
+disconnect from NZCON; 
+quit;
+
+PROC SQL;
+	CREATE TABLE DB2 AS
+		SELECT BASEL_ACCT_ID,GENL_LEDGER_BAL_ADJ_AMT,OS_BAL_AMT FROM DB2RRAP.BASEL_REVLVNG_CR_INSTRMNT_ADJ WHERE MTH_TM_ID=&MTH_TM_ID.;
+QUIT;
+
+PROC SQL;
+	CREATE TABLE IIAS AS
+		SELECT BASEL_ACCT_ID AS BASEL_ACCT_ID_I,TOT_NEW_BAL_AMT FROM NZRRAP.BASEL_REVLVNG_CR_MTH_SNAPSHOT WHERE MTH_TM_ID=&MTH_TM_ID.;
+QUIT;
+
+PROC SQL;
+	CREATE TABLE JOINED AS
+		SELECT * FROM IIAS I
+			LEFT JOIN
+				DB2 D
+				ON I.BASEL_ACCT_ID_I=D.BASEL_ACCT_ID;
+QUIT;
+
+
+
+		
+/*Query the base table in IIAS :BASEL_REVLVNG_CR_MTH_SNAPSHOT*/
+PROC SQL ;
+CONNECT USING NZRRAP AS NZCON;		
+   create table BASEL_REVLVING_CR_MTH as
+    select *              
+    from connection to NZCON
+	( SELECT DISTINCT
+		SS.MTH_TM_ID, 
+		'KS' as SRC_SYS_CD0,
+		date(to_date('2016-11-01','YYYY-MM-DD')) as DLGD_F_DT,
+		SS.BASEL_ACCT_ID, 
+		SS.PRIM_BASEL_CUST_ID, 
+		SS.STEP_PLN_SNAPSHOT_ID, 
+		SS.ACCT_NUM,
+        SS.PRD_CD,  
+		SS.SUB_PRD_CD AS SUB_PRD_CD0, 
+		BDV.HELOC_F,
+		BDV.BASEL_PRD_CD AS BDV_BASEL_PRD_CD,
+		SS.ACCT_OPND_DT,
+        SS.TRNST_NUM,  
+		round(SS.CR_LMT_AMT,8) as CR_LMT_AMT0, 
+		SS.LAST_PYMT_DT, SS.TOT_NEW_BAL_AMT,
+		SS.TOT_NEW_BAL_AMT as OS_BAL_AMT, 
+		CDV.APRSD_VAL_TERANET_INDEXED_AMT AS INDEXED_PRPTY_VAL_AMT,
+		LTV.METRPL_AREA_NM0 AS V_METRPL_AREA_NM,
+		LTV.CRNT_METRPL_TERANET_INDEX, 
+		LTV.APPRSL_DT_PRPTY_VAL_AMT, 
+		LTV.CRNT_PRPTY_VAL_AMT, 
+		LTV.PREV_12_QTR_PRPTY_VAL_AMT as PREV_12_QTR_PRPTY_VAL_AMT0, 
+		ST.ACCT_SENRTY_CD as lkp_ACCT_SENRTY_CD, 
+		ST.MAX_ACCT_BAL_AMT as lkp_MAX_ACCT_BAL_AMT, 
+		ST.EXPSR_AT_DFT_RTO as LKP_EXPSR_AT_DFT_RTO, 
+		ST.CRNT_LTV_RTO as LKP_CRNT_LTV_RTO, 
+		ST.INDEXED_CCLTV_RTO as LKP_INDEXED_CCLTV_RTO,
+		(CASE WHEN LTV.PREV_12_QTR_PRPTY_VAL_AMT IS NULL or  LTV.CRNT_PRPTY_VAL_AMT =0 or LTV.CRNT_PRPTY_VAL_AMT IS NULL THEN  null
+				ELSE (1- LTV.PREV_12_QTR_PRPTY_VAL_AMT/LTV.CRNT_PRPTY_VAL_AMT) end) AS v_PROPERTY_VAL_RATIO,
+		MBF.METRPL_AREA_NM,
+		METRPL_BREACH_F,TT.tm_lvl_ST_dt,TT.tm_lvl_end_dT,
+		TT.tm_lvl_end_dT as v_PROCESSING_DATE,
+		SUBSTR(TT.tm_lvl_end_dT,1,4)||LPAD(SUBSTR(TT.tm_lvl_end_dT,6,2),2,'0') AS v_PROCESSING_DATE_FINAL,
+		RPTG.ASST_CL_NUM, 
+	    RPTG.BASEL_PRD_ABR,
+        RPTG.REVISED_EXPSR_OV_125K_F,
+        RPTG.NCR_EXPSR_CL_KEY_VAL 
+
+	FROM
+		(SELECT *  FROM &net_db..BASEL_REVLVNG_CR_MTH_SNAPSHOT 
+	WHERE MTH_TM_ID=&MTH_TM_ID. 
+
+) SS
+
+	LEFT JOIN 	&net_db..TM_DIM TT ON SS.MTH_TM_ID=TT.TM_ID
+	
+			
+	LEFT OUTER JOIN &net_db..BASEL_REVLVNG_CR_ACCT_DRVD_VARS CDV
+		ON
+		SS.BASEL_ACCT_ID=CDV.BASEL_ACCT_ID
+		AND CDV.MTH_TM_ID =&MTH_TM_ID.
+
+	left outer join  &net_db..BASEL_REVLVNG_CR_RPTG_DRVD_VAR_IFRS RPTG 
+        On
+		SS.BASEL_ACCT_ID=RPTG.BASEL_ACCT_ID
+		AND RPTG.MTH_TM_ID =&MTH_TM_ID.
+
+	LEFT OUTER JOIN &net_db..BASEL_REVLVNG_CR_BASE_DRVD_VARS BDV
+		ON
+		SS.BASEL_ACCT_ID=BDV.BASEL_ACCT_ID
+		AND BDV.MTH_TM_ID =&MTH_TM_ID.
+
+	LEFT OUTER JOIN &net_db..BASEL_STEP_PLN_MTH_SNAPSHOT STEPSS
+		ON
+		SS.STEP_PLN_SNAPSHOT_ID=STEPSS.STEP_PLN_SNAPSHOT_ID
+		and STEPSS.MTH_TM_ID  =&MTH_TM_ID.
+
+
+						
+				
+	left outer Join (
+		SELECT LTV.MTH_TM_ID,
+			LTRIM(RTRIM(LTV.METRPL_AREA_NM)) as METRPL_AREA_NM0, 
+			LTV.CRNT_METRPL_TERANET_INDEX as CRNT_METRPL_TERANET_INDEX, 
+			LTV.APPRSL_DT_PRPTY_VAL_AMT as APPRSL_DT_PRPTY_VAL_AMT, 
+			LTV.CRNT_PRPTY_VAL_AMT as CRNT_PRPTY_VAL_AMT, 
+			LTV.PREV_12_QTR_PRPTY_VAL_AMT as PREV_12_QTR_PRPTY_VAL_AMT, 
+			LTV.STEP_PLN_SNAPSHOT_ID as STEP_PLN_SNAPSHOT_ID 
+		FROM &net_db..BASEL_STEP_LTV_DRVD_VARS LTV
+		WHERE LTV.MTH_TM_ID =&MTH_TM_ID.) ltv 
+		on SS.STEP_PLN_SNAPSHOT_ID=ltv.STEP_PLN_SNAPSHOT_ID and SS.MTH_TM_ID=LTV.MTH_TM_ID 
+
+
+	left join (
+	SELECT DISTINCT DLGD.METRPL_BREACH_F as METRPL_BREACH_F, 
+		upper(LTRIM(RTRIM(DLGD.METRPL_AREA_NM )) ) as METRPL_AREA_NM 
+		FROM &net_db..DLGD_SCRI_QTR_DRVD_VARS DLGD 
+		JOIN ( SELECT MAX(TM_ID) AS MAX_TM_ID 
+		FROM &net_db..TM_DIM WHERE FNCL_QTR_KEY = (SELECT FNCL_QTR_KEY FROM &net_db..TM_DIM WHERE TM_LVL='Month' and TM_ID=&MTH_TM_ID.) ) T 
+		ON DLGD.MTH_TM_ID=T.MAX_TM_ID) MBF ON upper(LTV.METRPL_AREA_NM0)=MBF.METRPL_AREA_NM
+
+	left outer join
+			( SELECT 
+				ACCT_SENRTY_CD as ACCT_SENRTY_CD, 
+				MAX_ACCT_BAL_AMT as MAX_ACCT_BAL_AMT, 
+				EXPSR_AT_DFT_RTO as EXPSR_AT_DFT_RTO, 
+				CRNT_LTV_RTO as CRNT_LTV_RTO, 
+				INDEXED_CCLTV_RTO as INDEXED_CCLTV_RTO, 
+				BASEL_ACCT_ID as BASEL_ACCT_ID, 
+				STEP_PLN_SNAPSHOT_ID as STEP_PLN_SNAPSHOT_ID 
+				FROM 
+				&net_db..BASEL_ACCT_LTV_DRVD_VARS
+				WHERE MTH_TM_ID=&MTH_TM_ID.
+				and ACCT_SENRTY_CD in (2, 4)
+				) ST
+
+				on ss.BASEL_ACCT_ID = st.BASEL_ACCT_ID AND ss.STEP_PLN_SNAPSHOT_ID = st.STEP_PLN_SNAPSHOT_ID
+		ORDER BY SS.BASEL_ACCT_ID
+
+		);
+disconnect from NZCON; 
+quit;
+
+
+PROC SQL ;
+CONNECT USING NZRRAP AS NZCON;
+  	create table LXREF as
+        select *              
+        from connection to NZCON
+		( 
+		SELECT LXREF.MTH_TM_ID,LXREF.BASEL_ACCT_ID,
+		        LXREF.BASEL_SEG_ID AS L_BASEL_SEG_ID,
+				ss.CALC_SCORE as LGD_ACCT_SCORE,/*Y*/
+				BASEL_SCORECRD_NM as LGD_BASEL_SCORECRD_NM,/*Y*/
+				seg_num as LGD_BASEL_SEG_NUM,/*Y*/
+				b.final_rto as LGD_FINAL_RPTG_RTO,						
+				MO.MODEL_NM as LGD_MODEL_NM0,/*Y*/
+				final_rto o_PARM_FINAL_RTO_LGD, 
+			 	unadjusted_rptg_rto unadjusted_rptg_rto_LGD,
+				seg_num v_L_seg_num
+				
+		 FROM &net_db..LGD_SEG_ACCT_XREF LXREF
+		LEFT JOIN &net_db..BASEL_SEG bs 				ON LXREF.basel_seg_id=bs.basel_seg_id 
+		LEFT JOIN &net_db..BASEL_SEG_RPTG_PARM b 		ON LXREF.basel_seg_id=b.basel_seg_id  and ( select 	tm_lvl_end_dt from 	&net_db..TM_DIM where tm_id = &MTH_TM_ID.)  BETWEEN b.EFF_FROM_DT AND b.EFF_TO_DT 
+		LEFT JOIN &net_db..BASEL_MODEL_REL	MR			ON 	LXREF.BASEL_MODEL_REL_ID = MR.BASEL_MODEL_REL_ID
+		LEFT JOIN &net_db..BASEL_MODEL_SCORECRD_HDR SH ON MR. BASEL_MODEL_SCORECRD_HDR_ID = SH.BASEL_MODEL_SCORECRD_HDR_ID
+		left join &net_db..BASEL_MODEL mo on LXREF.BASEL_MODEL_ID=MO.BASEL_MODEL_ID
+	left join &net_db..BASEL_RCA_SCORE_SNAPSHOT SS	on LXREF.BASEL_ACCT_ID=SS.BASEL_ACCT_ID and LXREF.BASEL_MODEL_ID=SS.BASEL_MODEL_ID
+															AND LXREF.MTH_TM_ID=SS.MTH_TM_ID and sh.BASEL_MODEL_SCORECRD_HDR_ID=ss.BASEL_MODEL_SCORECRD_HDR_ID
+
+WHERE LXREF.MTH_TM_ID =&MTH_TM_ID. AND LXREF.BASEL_MODEL_REL_ID IN (SELECT BASEL_MODEL_REL_ID FROM &net_db..BASEL_MODEL_REL WHERE RPTG_USAGE_F = 'Y') 
+
+
+);
+
+
+  create table PXREF as
+            select *              
+            from connection to NZCON
+			( 
+		SELECT 	PXREF.MTH_TM_ID,
+		        PXREF.BASEL_ACCT_ID,
+				BASEL_SCORECRD_NM AS PD_BASEL_SCORECRD_NM, /* Y*/
+				seg_num as PD_BASEL_SEG_NUM,/* Y*/
+				b.final_rto as PD_FINAL_RPTG_RTO,/* Y*/
+				MO.MODEL_NM as PD_MODEL_NM0,/* Y*/
+				ss.CALC_SCORE as PD_ACCT_SCORE/* Y*/
+						
+	 FROM &net_db..PD_SEG_ACCT_XREF PXREF
+	LEFT JOIN &net_db..BASEL_SEG bs 				ON PXREF.basel_seg_id=bs.basel_seg_id 
+	LEFT JOIN &net_db..BASEL_SEG_RPTG_PARM b 		ON PXREF.basel_seg_id=b.basel_seg_id  and ( select 	tm_lvl_end_dt from 	&net_db..TM_DIM where tm_id = &MTH_TM_ID.)  BETWEEN b.EFF_FROM_DT AND b.EFF_TO_DT 
+	LEFT JOIN &net_db..BASEL_MODEL_REL	MR			ON PXREF.BASEL_MODEL_REL_ID = MR.BASEL_MODEL_REL_ID
+	LEFT JOIN &net_db..BASEL_MODEL_SCORECRD_HDR SH ON MR. BASEL_MODEL_SCORECRD_HDR_ID = SH.BASEL_MODEL_SCORECRD_HDR_ID
+	left join &net_db..BASEL_MODEL mo on PXREF.BASEL_MODEL_ID=MO.BASEL_MODEL_ID
+	left join &net_db..BASEL_RCA_SCORE_SNAPSHOT SS	on PXREF.BASEL_ACCT_ID=SS.BASEL_ACCT_ID and PXREF.BASEL_MODEL_ID=SS.BASEL_MODEL_ID
+															AND PXREF.MTH_TM_ID=SS.MTH_TM_ID and sh.BASEL_MODEL_SCORECRD_HDR_ID=ss.BASEL_MODEL_SCORECRD_HDR_ID
+WHERE PXREF.MTH_TM_ID =&MTH_TM_ID. AND PXREF.BASEL_MODEL_REL_ID IN (SELECT BASEL_MODEL_REL_ID FROM &net_db..BASEL_MODEL_REL WHERE RPTG_USAGE_F = 'Y') 
+
+);
+  create table EXREF as
+     	       select *              
+      	      from connection to NZCON
+				( 
+			SELECT EXREF.MTH_TM_ID ,EXREF.BASEL_ACCT_ID,
+				BASEL_SCORECRD_NM AS E_BASEL_SCORECRD_NM,/*Y*/
+				seg_num as EAD_BASEL_SEG_NUM,/*Y*/
+				B.FINAL_RTO AS EAD_FINAL_RPTG_RTO,/*Y*/
+				MO.MODEL_NM EAD_MODEL_NM0/*Y*/
+
+		 FROM &net_db..EAD_SEG_ACCT_XREF EXREF 
+		LEFT JOIN &net_db..BASEL_SEG bs 				ON EXREF.basel_seg_id=bs.basel_seg_id 
+		LEFT JOIN &net_db..BASEL_SEG_RPTG_PARM b 		ON EXREF.basel_seg_id=b.basel_seg_id  and ( select 	tm_lvl_end_dt from 	&net_db..TM_DIM where tm_id = &MTH_TM_ID.)  BETWEEN b.EFF_FROM_DT AND b.EFF_TO_DT 
+		LEFT JOIN &net_db..BASEL_MODEL_REL	MR			ON EXREF.BASEL_MODEL_REL_ID = MR.BASEL_MODEL_REL_ID
+		LEFT JOIN &net_db..BASEL_MODEL_SCORECRD_HDR SH ON MR.BASEL_MODEL_SCORECRD_HDR_ID = SH.BASEL_MODEL_SCORECRD_HDR_ID
+		left join &net_db..BASEL_MODEL mo 				on EXREF.BASEL_MODEL_ID=MO.BASEL_MODEL_ID
+		left join &net_db..BASEL_RCA_SCORE_SNAPSHOT SS	on EXREF.BASEL_ACCT_ID=SS.BASEL_ACCT_ID and EXREF.BASEL_MODEL_ID=SS.BASEL_MODEL_ID
+															AND EXREF.MTH_TM_ID=SS.MTH_TM_ID and sh.BASEL_MODEL_SCORECRD_HDR_ID=ss.BASEL_MODEL_SCORECRD_HDR_ID
+		WHERE EXREF.MTH_TM_ID =&MTH_TM_ID. AND EXREF.BASEL_MODEL_REL_ID IN (SELECT BASEL_MODEL_REL_ID FROM &net_db..BASEL_MODEL_REL WHERE RPTG_USAGE_F = 'Y') 
+
+
+);
+ create table Asset_cl as
+     	       select *              
+      	      from connection to NZCON
+				( 
+			SELECT RPTG.basel_acct_id, d.CCAR_EXPSR_CL_NM
+		 FROM &net_db..BASEL_REVLVNG_CR_RPTG_DRVD_VAR_IFRS RPTG
+         LEFT JOIN &net_db..BASEL_EXPSR_CL_DIM d ON &yearm. BETWEEN d.EFF_FROM_YR_MTH AND d.EFF_TO_YR_MTH 
+					AND 	LTRIM(RTRIM(RPTG.NCR_EXPSR_CL_KEY_VAL)) = LTRIM(RTRIM(d.NCR_EXPSR_CL_KEY_VAL))
+			WHERE RPTG.MTH_TM_ID=&MTH_TM_ID.
+
+);
+
+
+disconnect from NZCON; 
+quit;
+
+
+PROC SQL ;
+CONNECT USING NZRRAP AS NZCON;
+   create table RPTG_PRD_LKP1 as
+    select *              
+    from connection to NZCON
+	( 	SELECT 
+		       TRIM(BASEL_PRD_TP_CD) AS BASEL_PRD_TP_CD,
+		       TRIM(PRD_ID) AS PRD_ID,
+		       TRIM(BASEL_SUB_PRD_NM) AS BASEL_SUB_PRD_NM,
+		       TRIM(BCAR_SCHED_NUM) AS BCAR_SCHED_NUM,
+		       TRIM(CCAR_BASEL_PRD_TP_NM) AS CCAR_BASEL_PRD_TP_NM0,
+		       TRIM(SCRTY_TP_CD) AS LKP_SCRTY_TP_CD,
+		       TRIM(PL.PRD_CD) AS PRD_CD,
+		       TRIM(SUB_PRD_CD) AS SUB_PRD_CD0,
+		       TRIM(REVISED_EXPSR_OV_125K_F) AS REVISED_EXPSR_OV_125K_F,
+		       TRIM(HELOC_F) AS HELOC_F,
+		       TRIM(BASEL_PRD_CD) AS BASEL_PRD_CD,
+			   LTRIM(RTRIM(EGL_DEPRTMNT)) as EGL_DEPRTMNT
+		  FROM &net_db..BASEL_RPTG_PRD_LKP PL
+		  	left join &net_db..BASEL_EGL_LKP egl on LTRIM(RTRIM(PL.PRD_ID))=LTRIM(RTRIM(egl.PRD_CD))
+		  WHERE	  TRIM(SRC_SYS_CD)='KS'  AND &yearm. between eff_from_yr_mth AND eff_to_yr_mth 
+			);
+disconnect from NZCON; 
+quit;
+
+
+PROC SQL ;
+CONNECT USING NZRRAP AS NZCON;
+   create table BASEL_REVLVNG_CR_IFRS as
+    select *              
+    from connection to NZCON
+	( 	SELECT RPTG.BASEL_ACCT_ID from  &net_db..BASEL_REVLVNG_CR_RPTG_DRVD_VAR_IFRS RPTG 
+        where RPTG.MTH_TM_ID =&MTH_TM_ID.
+			);
+disconnect from NZCON; 
+quit;
+
+Proc sql;
+create table BASEL_REVLVNG_CR_IFRS as
+select a.* ,
+SUM(c.TOT_NEW_BAL_AMT,c.GENL_LEDGER_BAL_ADJ_AMT) AS AF_ADJ_OS_BAL_AMT, 
+round(CALCULATED AF_ADJ_OS_BAL_AMT,0.00000001) AS VADJUSTED_OS_BAL_AMT
+from BASEL_REVLVNG_CR_IFRS a
+left join Joined c
+on a.basel_acct_id=c.BASEL_ACCT_ID_I
+;
+quit;
+
+Proc sql;
+create table MERG01 as
+select
+a.*,b.*, 
+c.AF_ADJ_OS_BAL_AMT,c.VADJUSTED_OS_BAL_AMT,
+d.CCAR_EXPSR_CL_NM
+from BASEL_REVLVING_CR_MTH a
+left join BASEL_CC_SEC_ACCT_MTH_SNAP b on
+a.basel_acct_id=b.BASEL_ACCT_ID_CCAR_MATCHED
+left join BASEL_REVLVNG_CR_IFRS c
+on a.basel_acct_id=c.BASEL_ACCT_ID
+left join Asset_cl d
+on a.basel_acct_id=d.basel_acct_id	;
+quit;
+
+
+
+PROC SQL ;
+CREATE TABLE MERG02 AS
+select *
+from MERG01 CM
+LEFT JOIN LXREF L ON CM.BASEL_ACCT_ID=L.BASEL_ACCT_ID and cm.mth_tm_id=l.MTH_TM_ID
+LEFT JOIN PXREF P ON CM.BASEL_ACCT_ID=P.BASEL_ACCT_ID  and cm.mth_tm_id=p.MTH_TM_ID
+LEFT JOIN EXREF E ON CM.BASEL_ACCT_ID=E.BASEL_ACCT_ID  and cm.mth_tm_id=e.MTH_TM_ID
+;
+
+quit;
+PROC SQL;
+CREATE TABLE MERG03 AS 
+SELECT 	cm.*,
+		PL1.BASEL_PRD_TP_CD,
+		PL1.PRD_ID,
+		PL1.BASEL_SUB_PRD_NM as SRC_PRD_DESC,
+		PL1.BCAR_SCHED_NUM,
+		PL1.CCAR_BASEL_PRD_TP_NM0,
+		PL1.LKP_SCRTY_TP_CD,
+		PL1.EGL_DEPRTMNT
+FROM MERG02 CM
+left join RPTG_PRD_LKP1 PL1 ON CM.PRD_CD = PL1.PRD_CD AND CM.SUB_PRD_CD0 = PL1.SUB_PRD_CD0 
+AND CM.REVISED_EXPSR_OV_125K_F = PL1.REVISED_EXPSR_OV_125K_F AND cm.HELOC_F = PL1.HELOC_F AND BDV_BASEL_PRD_CD = PL1.BASEL_PRD_CD
+;
+QUIT;
+
+
+Proc sort data = MERG03 nodupkey out=MERG03_dd;
+by basel_acct_id; run;
+
+data LOAD
+
+;
+	set  MERG03_dd;
+	format INSRT_PROCESS_TMSTMP UPDT_PROCESS_TMSTMP datetime25.6 
+		SRC_SYS_CD $10.  PD_MODEL_NM $40. LGD_MODEL_NM $40. EAD_MODEL_NM $40. ASST_CL_DESC $255. 
+		SCRTY_TP_DESC $50.  MORT_NUM  $50.   LOAN_NUM $15. 
+		INTR_ACCR_AMT BEFORE_ZERO_NET_UNDRAWN_AMT 17.3  SUB_PRD_CD $10.   
+		MAT_DT 10. STEP_F $1. HOUSE_TP_NM  $20.  
+		PRPTY_VAL_CORR_PCTG AF_SECRTZTN_BAL_AMT 11.4 OS_PRNCPL_BAL_AMT 17.3
+		LTV_PERCENTAGE $4.
+		UNADJUSTED_ADD_ON_BAL_AMT AF_ZERO_NET_UNDRAWN_AMT 17.3 ADJUSTED_OS_BAL_AMT CR_LMT_AMT 20.8
+		LNG_RUN_LGD_ADD_ON_RTO DLGD_RPTG_RTO 28.8 PRPTY_VAL_CORR_PCTG0 CRNT_LTV_RTO 28.10
+		;
+	UNADJUSTED_ADD_ON_BAL_AMT=0.000;
+
+
+
+	/*o_AF_SECRTZTN_BAL_AMT=IIF(v_ADJUSTED_OS_BAL_AMT<0, 0, v_ADJUSTED_OS_BAL_AMT)*/
+	IF vADJUSTED_OS_BAL_AMT LT 0 and vADJUSTED_OS_BAL_AMT ne . then
+		do;
+			AF_SECRTZTN_BAL_AMT= 0;
+		end;
+	else
+		do;
+			AF_SECRTZTN_BAL_AMT= round(vADJUSTED_OS_BAL_AMT,.0001);
+		end;
+
+	if  L_BASEL_SEG_ID in ( 16104 ,16020 ,16112 ,16109 ,16026 ,16106 ,16050 ,16056 ,16080 ,16086 ,16111 ,16108 ,16055 ,16025 ,16085 ) then
+		do;
+			v_DLGD_F='N';
+		end;
+	else if HELOC_F='Y' and ACCT_OPND_DT GE DLGD_F_DT then
+		do;
+			v_DLGD_F='Y';
+		end;
+	else
+		do;
+			v_DLGD_F='N';
+		end;
+
+	/*METRPL_AREA_NM=V_METRPL_AREA_NM;*/
+	/*upper(decode (true, v_DLGD_F='N', NULL,  isnull (lkp_METRPL_AREA_NM), '11', is_spaces(lkp_METRPL_AREA_NM),'11', lkp_METRPL_AREA_NM)  )*/
+	/*METRPL_AREA_NM=V_METRPL_AREA_NM;*/
+	if v_DLGD_F='N' then
+		do;
+			METRPL_AREA_NM='';
+		end;
+	else if  V_METRPL_AREA_NM='' then
+		do;
+			METRPL_AREA_NM='11';
+		end;
+	else if  V_METRPL_AREA_NM=' ' then
+		do;
+			METRPL_AREA_NM='11';
+		end;
+	else
+		do;
+			METRPL_AREA_NM=upcase(V_METRPL_AREA_NM);
+		end;
+
+	SRC_SYS_CD=SRC_SYS_CD0;
+	DLGD_F=v_DLGD_F;
+	LGD_MODEL_NM=LGD_MODEL_NM0;
+	EAD_MODEL_NM=EAD_MODEL_NM0;
+	PD_MODEL_NM=PD_MODEL_NM0;
+	SUB_PRD_CD=SUB_PRD_CD0;
+	/*DECODE (TRUE,*/
+	/* IN (L_BASEL_SEG_ID, 16104 ,16020 ,16112 ,16109 ,16026 ,16106 ,16050 ,16056 ,16080 ,16086 ,16111 ,16108 ,16055 ,16025 ,16085 ),'N',*/
+	/*--BDV_PIT_STAT_VER_2_CD='CUR', 'N',*/
+	/*HELOC_F='Y' and ACCT_OPND_DT>=TO_DATE ($$DLGD_F_DT,'YYYY-MM-DD'),  'Y','N')*/
+
+	EAD_BASEL_SCORECRD_NM=E_BASEL_SCORECRD_NM;
+
+
+	/*v_SECURITIZATION_FACTOR=0;*/
+	IF v_DLGD_F='N' THEN
+		DO;
+			PRPTY_VAL_CORR_PCTG=.;
+			PRPTY_VAL_CORR_PCTG0=.;
+		END;
+	ELSE IF v_DLGD_F='Y' and METRPL_BREACH_F='Y' and    v_PROPERTY_VAL_RATIO>0.25 and v_PROPERTY_VAL_RATIO ne . THEN
+		DO;
+			PRPTY_VAL_CORR_PCTG=round(v_PROPERTY_VAL_RATIO,0.0001);
+			PRPTY_VAL_CORR_PCTG0=v_PROPERTY_VAL_RATIO;
+		END;
+	ELSE IF v_DLGD_F='Y' and METRPL_BREACH_F='Y' and    v_PROPERTY_VAL_RATIO<=0.25 and v_PROPERTY_VAL_RATIO ne . THEN
+		DO;
+			PRPTY_VAL_CORR_PCTG=0.25;
+			PRPTY_VAL_CORR_PCTG0= 0.25;
+		end;
+	ELSE IF v_DLGD_F='Y' and METRPL_BREACH_F='N' and   v_PROPERTY_VAL_RATIO >0 and v_PROPERTY_VAL_RATIO ne . THEN
+		DO;
+			PRPTY_VAL_CORR_PCTG=round(v_PROPERTY_VAL_RATIO,0.0001);
+			PRPTY_VAL_CORR_PCTG0= v_PROPERTY_VAL_RATIO;
+		end;
+	ELSE IF v_DLGD_F='Y' and METRPL_BREACH_F='N' and   v_PROPERTY_VAL_RATIO <=0 and v_PROPERTY_VAL_RATIO ne . THEN
+		DO;
+			PRPTY_VAL_CORR_PCTG=0;
+			PRPTY_VAL_CORR_PCTG0= 0;
+		end;
+	ELSE
+		DO;
+			PRPTY_VAL_CORR_PCTG=.;
+			PRPTY_VAL_CORR_PCTG0=.;
+		END;
+
+	/*v11_MAX=decode (true,*/
+	/*isnull( lkp_INDEXED_CCLTV_RTO) or isnull(v_PRPTY_VAL_CORR_PCTG), null,*/
+	/*lkp_INDEXED_CCLTV_RTO-(0.8*(1 - v_PRPTY_VAL_CORR_PCTG))>0,lkp_INDEXED_CCLTV_RTO-(0.8*(1 - v_PRPTY_VAL_CORR_PCTG)),*/
+	/*0)*/
+	IF LKP_INDEXED_CCLTV_RTO EQ . or PRPTY_VAL_CORR_PCTG0 EQ . THEN
+		do;
+			v11_MAX = .;
+		end;
+	ELSE IF LKP_INDEXED_CCLTV_RTO-(0.8*(1 - PRPTY_VAL_CORR_PCTG0))>0 then
+		do;
+			v11_MAX=round(lkp_INDEXED_CCLTV_RTO-(0.8*(1 - PRPTY_VAL_CORR_PCTG0)),0.00000001);
+		end;
+	else
+		do;
+			v11_MAX=0;
+		end;
+
+	/*v11_MAX_LNG_STEP2=decode (true,*/
+	/*isnull( lkp_INDEXED_CCLTV_RTO) or isnull(v_PRPTY_VAL_CORR_PCTG), */
+	/*lkp_CRNT_LTV_RTO-(0.8*(1 - v_PRPTY_VAL_CORR_PCTG))>0,lkp_CRNT_LTV_RTO-(0.8*(1 - v_PRPTY_VAL_CORR_PCTG)),*/
+	/*0)*/
+	if lkp_INDEXED_CCLTV_RTO eq . or PRPTY_VAL_CORR_PCTG0 eq . then
+		do;
+			v11_MAX_LNG_STEP2= .;
+		end;
+
+	if lkp_CRNT_LTV_RTO-(0.8*(1 - PRPTY_VAL_CORR_PCTG0))>0 then
+		do;
+			v11_MAX_LNG_STEP2= round(lkp_CRNT_LTV_RTO-(0.8*(1 - PRPTY_VAL_CORR_PCTG0)),0.00000001);
+		end;
+	else
+		do;
+			v11_MAX_LNG_STEP2=0;
+		end;
+
+	/*V12_MAX= decode(true,
+	isnull (lkp_INDEXED_CCLTV_RTO), null ,
+	lkp_INDEXED_CCLTV_RTO-0.8<=0,0,
+	lkp_INDEXED_CCLTV_RTO-0.8
+	)
+	*/
+	if lkp_INDEXED_CCLTV_RTO eq . then
+		do;
+			V12_MAX=.;
+		end;
+	else if lkp_INDEXED_CCLTV_RTO-0.8 LE 0 then
+		do;
+			V12_MAX=0;
+		end;
+	else
+		do;
+			V12_MAX=lkp_INDEXED_CCLTV_RTO-0.8;
+		end;
+
+	/*V12_MAX_LNG_STEP2= decode(true, isnull (lkp_INDEXED_CCLTV_RTO), null , lkp_CRNT_LTV_RTO-0.8<=0,0, lkp_CRNT_LTV_RTO-0.8 ) */
+	if lkp_INDEXED_CCLTV_RTO eq . then
+		do;
+			V12_MAX_LNG_STEP2= .;
+		end;
+	else if lkp_CRNT_LTV_RTO-0.8 LE 0 then
+		do;
+			V12_MAX_LNG_STEP2=0;
+		end;
+	else
+		do;
+			V12_MAX_LNG_STEP2=lkp_CRNT_LTV_RTO-0.8;
+		end;
+
+	/*V13_MIN= IIF (lkp_INDEXED_CCLTV_RTO < v11_MAX,lkp_INDEXED_CCLTV_RTO,  v11_MAX)*/
+	if lkp_INDEXED_CCLTV_RTO LT v11_MAX then
+		do;
+			V13_MIN= lkp_INDEXED_CCLTV_RTO;
+		end;
+	else
+		do;
+			V13_MIN= v11_MAX;
+		end;
+
+	/*v14_MINUS_13_12=V13_MIN- V12_MAX*/
+	v14_MINUS_13_12= V13_MIN- V12_MAX;
+
+	/*V15_DIVID= IIF (lkp_CRNT_LTV_RTO<>0 AND NOT ISNULL(lkp_CRNT_LTV_RTO), v14_MINUS_13_12/lkp_CRNT_LTV_RTO   , null)*/
+	if lkp_CRNT_LTV_RTO NE 0 AND lkp_CRNT_LTV_RTO ne . then
+		do;
+			V15_DIVID= round(v14_MINUS_13_12/lkp_CRNT_LTV_RTO,0.000000001);
+		end;
+	else
+		do;
+			V15_DIVID= .;
+		end;
+
+	/*v16_MAX= IIF (V15_DIVID>0, V15_DIVID, 0)*/
+	if V15_DIVID>0 then
+		do;
+			v16_MAX=V15_DIVID;
+		end;
+	else
+		do;
+			v16_MAX=0;
+		end;
+
+	/*V21_CCLTV_NULL= v11_MAX_LNG_STEP2 - V12_MAX_LNG_STEP2*/
+	V21_CCLTV_NULL= v11_MAX_LNG_STEP2 - V12_MAX_LNG_STEP2;
+
+	/*V22_DIVID = iif (lkp_CRNT_LTV_RTO<>0 and not isnull(lkp_CRNT_LTV_RTO),  V21_CCLTV_NULL/lkp_CRNT_LTV_RTO, null)*/
+	if lkp_CRNT_LTV_RTO ne 0 and lkp_CRNT_LTV_RTO NE . then
+		do;
+			V22_DIVID =  round(V21_CCLTV_NULL/lkp_CRNT_LTV_RTO,0.000000001);
+		end;
+	else
+		do;
+			V22_DIVID = .;
+		end;
+
+	/*v_LNG_RUN_LGD_ADD_ON_RTO=   DECODE (TRUE,*/
+	/*v_DLGD_F='Y' and not isnull (lkp_CRNT_LTV_RTO) and not isnull(v_PRPTY_VAL_CORR_PCTG) and not isnull(lkp_INDEXED_CCLTV_RTO)    ,v16_MAX,*/
+	/*v_DLGD_F='Y' and not isnull (lkp_CRNT_LTV_RTO) and not isnull(v_PRPTY_VAL_CORR_PCTG) and  isnull(lkp_INDEXED_CCLTV_RTO) */
+	/*, V22_DIVID,*/
+	/*null)*/
+	IF v_DLGD_F='Y' and lkp_CRNT_LTV_RTO NE .  AND PRPTY_VAL_CORR_PCTG0 NE . and lkp_INDEXED_CCLTV_RTO NE . THEN
+		DO;
+			v_LNG_RUN_LGD_ADD_ON_RTO= v16_MAX;
+		END;
+	ELSE IF v_DLGD_F='Y' and lkp_CRNT_LTV_RTO NE . and PRPTY_VAL_CORR_PCTG0 NE . and  lkp_INDEXED_CCLTV_RTO EQ . THEN
+		DO;
+			v_LNG_RUN_LGD_ADD_ON_RTO= V22_DIVID;
+		END;
+	ELSE
+		DO;
+			v_LNG_RUN_LGD_ADD_ON_RTO= .;
+		END;
+
+	LNG_RUN_LGD_ADD_ON_RTO= round(v_LNG_RUN_LGD_ADD_ON_RTO, .00000001);
+	v_DLGD_RPTG_RTO_PLUS= v_LNG_RUN_LGD_ADD_ON_RTO+UNADJUSTED_RPTG_RTO_lgd;
+	v_DLGD_RPTG_RTO_PLUS_max= v_DLGD_RPTG_RTO_PLUS;
+
+	/*v_DLGD_RPTG_RTO_PLUS_max_min= IIF(v_DLGD_RPTG_RTO_PLUS_max>=1.0, 1.0,  v_DLGD_RPTG_RTO_PLUS_max)    */
+	IF v_DLGD_RPTG_RTO_PLUS_max GE 1.0 THEN
+		do;
+			v_DLGD_RPTG_RTO_PLUS_max_min=  1.0;
+		END;
+	ELSE
+		DO;
+			v_DLGD_RPTG_RTO_PLUS_max_min=  v_DLGD_RPTG_RTO_PLUS_max;
+		END;
+
+	/*v_DLGD_RPTG_RTO_MAX= GREATEST(0.1, o_PARM_FINAL_RTO_LGD, v_DLGD_RPTG_RTO_PLUS_max_min)*/
+	if o_PARM_FINAL_RTO_LGD eq . or v_DLGD_RPTG_RTO_PLUS_max_min eq . then
+		do;
+			v_DLGD_RPTG_RTO_MAX=.;
+		end;
+	else
+		do;
+			v_DLGD_RPTG_RTO_MAX= max(0.1, o_PARM_FINAL_RTO_LGD, v_DLGD_RPTG_RTO_PLUS_max_min);
+		end;
+
+	/*o_DLGD_RPTG_RTO= decode (true,*/
+	/*						v_DLGD_F='Y' and not isnull( v_LNG_RUN_LGD_ADD_ON_RTO) ,v_DLGD_RPTG_RTO_MAX,*/
+	/*						o_PARM_FINAL_RTO_LGD);*/
+	/**/
+	if v_DLGD_F='Y' and v_LNG_RUN_LGD_ADD_ON_RTO ne . then
+		do;
+			DLGD_RPTG_RTO= round(v_DLGD_RPTG_RTO_MAX,0.00000001);
+		end;
+	else
+		do;
+			DLGD_RPTG_RTO= round(o_PARM_FINAL_RTO_LGD,0.00000001);
+		end;
+
+	if v_DLGD_F ='N' then
+		do;
+			CRNT_LTV_RTO = .;
+		end;
+	else
+		do;
+			CRNT_LTV_RTO= round(LKP_CRNT_LTV_RTO,0.0000000001);
+		end;
+
+	if v_DLGD_F ='Y' then
+		do;
+			PREV_12_QTR_PRPTY_VAL_AMT =PREV_12_QTR_PRPTY_VAL_AMT0;
+		end;
+	else
+		do;
+			PREV_12_QTR_PRPTY_VAL_AMT= .;
+		end;
+
+
+	/*if v_P_SEG_NUM eq . then do; v_v_P_SEG_NUM='00'; end; if v_P_SEG_NUM ne . then  do; v_v_P_SEG_NUM='00'|| strip(v_P_SEG_NUM); end;*/
+	/*if v_L_SEG_NUM eq . then do; v_v_L_SEG_NUM='00'; end; if v_L_SEG_NUM ne . then  do; v_v_L_SEG_NUM='00'|| strip(v_L_SEG_NUM); end;*/
+	/*if v_E_SEG_NUM eq . then do; v_v_E_SEG_NUM='00'; end; if v_E_SEG_NUM ne . then  do; v_v_E_SEG_NUM='00'|| strip(v_E_SEG_NUM); end;*/
+	
+	/*CCAR_BASEL_PRD_TP_NM=CCAR_BASEL_PRD_TP_NM0;*/
+	ACCT_NUM=	ACCT_NUM;
+	MORT_NUM='';
+	CAB_TRNST_NUM='';
+	LOAN_NUM= '';
+	INTR_ACCR_AMT= '';
+	CUST_BEHV_SCORE= '';
+	LEGAL_ENTITY='';
+	MAT_DT='';
+
+	IF STRIP(SCRTY_TP_CD) = '1' THEN
+		DO;
+			SCRTY_TP_CD= '01';
+		END;
+	ELSE IF STRIP(SCRTY_TP_CD)='2' THEN
+		DO;
+			SCRTY_TP_CD= '02';
+		END;
+	ELSE IF STRIP(SCRTY_TP_CD)='' THEN
+		DO;
+			SCRTY_TP_CD= '00';
+		END;
+	ELSE
+		DO;
+			SCRTY_TP_CD=strip(SCRTY_TP_CD);
+		END;
+
+	LTV_PERCENTAGE='';
+	HOUSE_TP_NM='';
+	LAST_RGL_PAY_DT= .;
+	PD_OFF_F='';
+	PD_OFF_DT=.;
+	RESIDUAL_MAT=.;
+	E_MAT_DT=.;
+	AMORT = .;
+	NOTE_DT=.;
+	BEFORE_ZERO_NET_DRAWN_AMT=vADJUSTED_OS_BAL_AMT;
+
+	IF sum(REVISED_EXPSR_AMT,-vADJUSTED_OS_BAL_AMT)<0 and sum(REVISED_EXPSR_AMT,-vADJUSTED_OS_BAL_AMT) ne . THEN
+		DO;
+			BEFORE_ZERO_NET_UNDRAWN_AMT= 0;
+		END;
+	ELSE
+		DO;
+			BEFORE_ZERO_NET_UNDRAWN_AMT= round(sum(REVISED_EXPSR_AMT,-vADJUSTED_OS_BAL_AMT),0.0001);
+		END;
+
+	IF AF_ZERO_NET_UNDRAWN_AMT LT 0 THEN
+		DO;
+			AF_ZERO_NET_UNDRAWN_AMT=0;
+		END;
+	ELSE
+		DO;
+			AF_ZERO_NET_UNDRAWN_AMT=AF_ZERO_NET_UNDRAWN_AMT;
+		END;
+
+	AUTH_AMT=CR_LMT_AMT0;
+
+	SCRTY_TP_DESC=LKP_SCRTY_TP_CD;
+
+	IF (BASEL_ACCT_ID_CCAR_MATCHED NE . OR BASEL_ACCT_ID_CCAR_MATCHED NE '') 
+		AND &MTH_TM_ID.>=&MTH_TM_ID1. then
+		do;
+			ADJUSTED_OS_BAL_AMT=round(vADJUSTED_OS_BAL_AMT*(1-v_SECURITIZATION_FACTOR),.00000001);
+		end;
+	else
+		do;
+			ADJUSTED_OS_BAL_AMT= round(vADJUSTED_OS_BAL_AMT,.00000001);
+		end;
+ 
+	/*IIF (NOT ISNULL(BASEL_ACCT_ID_CCAR_MATCHED) AND $$TM_ID>=$$CCSECSTARTTMID, CR_LMT_AMT-v_ADJUSTED_OS_BAL_AMT*v_SECURITIZATION_FACTOR, CR_LMT_AMT)*/
+	IF (BASEL_ACCT_ID_CCAR_MATCHED NE . OR BASEL_ACCT_ID_CCAR_MATCHED NE '') 
+		AND &MTH_TM_ID. GE &MTH_TM_ID1. then
+		do;
+			CR_LMT_AMTx= CR_LMT_AMT0 - round(vADJUSTED_OS_BAL_AMT*v_SECURITIZATION_FACTOR,.00000001);
+		end;
+	else
+		do;
+			CR_LMT_AMTx=round(CR_LMT_AMT0,.00000001);
+		end;
+
+	/*if CR_LMT_AMTx eq . then do; CR_LMT_AMT=0.00000000; end; else do; CR_LMT_AMT=CR_LMT_AMTx; end;*/
+	CR_LMT_AMT=round(CR_LMT_AMTx,0.00000001);
+
+	/*IF (BASEL_ACCT_ID_CCAR_MATCHED ne '' or BASEL_ACCT_ID_CCAR_MATCHED ne .) AND $TM_ID>=$$CCSECSTARTTMID, TOT_NEW_BAL_AMT - v_ADJUSTED_OS_BAL_AMT*v_SECURITIZATION_FACTOR,TOT_NEW_BAL_AMT)*/
+	IF (BASEL_ACCT_ID_CCAR_MATCHED ne '' or BASEL_ACCT_ID_CCAR_MATCHED ne . ) AND &mth_TM_ID. GE &mth_TM_ID1. THEN
+		DO;
+			OS_PRNCPL_BAL_AMT=round(TOT_NEW_BAL_AMT - (vADJUSTED_OS_BAL_AMT*v_SECURITIZATION_FACTOR),.00000001);
+		END;
+	ELSE
+		DO;
+			OS_PRNCPL_BAL_AMT=round(TOT_NEW_BAL_AMT, .00000001);
+		END;
+	INSRT_PROCESS_TMSTMP="&SYSDATE9.:&SYSTIME."dt;
+	UPDT_PROCESS_TMSTMP ="&SYSDATE9.:&SYSTIME."dt;
+		run;
+data final;
+retain basel_acct_id
+MTH_TM_ID
+SRC_SYS_CD
+acct_num
+loan_num
+mort_num
+BASEL_PRD_ABR 
+BASEL_PRD_TP_CD
+os_bal_amt
+ADJUSTED_OS_BAL_AMT
+CR_LMT_AMT
+INDEXED_PRPTY_VAL_AMT
+sub_prd_cd
+ead_basel_seg_num
+EAD_BASEL_SCORECRD_NM
+EAD_MODEL_NM
+PD_BASEL_SEG_NUM
+PD_BASEL_SCORECRD_NM
+PD_MODEL_NM
+LGD_BASEL_SEG_NUM
+LGD_BASEL_SCORECRD_NM
+LGD_MODEL_NM
+PD_ACCT_SCORE
+LGD_ACCT_SCORE
+dlgd_f
+metrpl_area_nm
+CCAR_EXPSR_CL_NM
+PD_FINAL_RPTG_RTO
+LGD_FINAL_RPTG_RTO
+DLGD_RPTG_RTO 
+EAD_FINAL_RPTG_RTO
+BCAR_SCHED_NUM
+SCRTY_TP_DESC 
+INSRT_PROCESS_TMSTMP 
+UPDT_PROCESS_TMSTMP;
+set load 	(keep=
+basel_acct_id
+MTH_TM_ID
+SRC_SYS_CD
+acct_num
+loan_num
+mort_num
+BASEL_PRD_ABR 
+BASEL_PRD_TP_CD
+os_bal_amt
+ADJUSTED_OS_BAL_AMT
+CR_LMT_AMT
+INDEXED_PRPTY_VAL_AMT
+sub_prd_cd
+ead_basel_seg_num
+EAD_BASEL_SCORECRD_NM
+EAD_MODEL_NM
+PD_BASEL_SEG_NUM
+PD_BASEL_SCORECRD_NM
+PD_MODEL_NM
+LGD_BASEL_SEG_NUM
+LGD_BASEL_SCORECRD_NM
+LGD_MODEL_NM
+PD_ACCT_SCORE
+LGD_ACCT_SCORE
+dlgd_f
+metrpl_area_nm
+CCAR_EXPSR_CL_NM
+PD_FINAL_RPTG_RTO
+LGD_FINAL_RPTG_RTO
+DLGD_RPTG_RTO 
+EAD_FINAL_RPTG_RTO
+BCAR_SCHED_NUM
+SCRTY_TP_DESC 
+INSRT_PROCESS_TMSTMP 
+UPDT_PROCESS_TMSTMP
+		);
+		run;
+
+PROC SQL NOPRINT;
+         	CONNECT USING NZRRAP AS NZCON;
+         	EXECUTE(DELETE FROM &net_db..BASEL_ANALYTCL_BL_INST_KS_IFRS WHERE MTH_TM_ID=&MTH_TM_ID. and SRC_SYS_CD='KS') BY NZCON;
+QUIT;
+
+proc append base=NZRRAP.BASEL_ANALYTCL_BL_INST_KS_IFRS  (BULKLOAD=YES BL_METHOD=CLILOAD) data=final force ; run;

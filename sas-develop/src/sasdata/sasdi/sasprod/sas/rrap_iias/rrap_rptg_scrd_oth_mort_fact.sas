@@ -1,0 +1,233 @@
+ 
+%rrap_autoexec(RRAPENV=REVOLVING_CREDIT);
+
+/*DECLARE THE PATH TO DEFINE AUTOCALL MACRO*/
+/*OPTIONS MAUTOSOURCE SASAUTOS='/sasdata/sasdev/macro/rrap';*/
+
+/*INITIALIZATION OF VARIABLES AND EXECUTE AUTOCALL MACRO*/
+/*%srrap_autoexec('BASELDB2');*/
+
+%GLOBAL YEARMONTH;
+%GLOBAL PRELOAD_DATA_COUNT;
+%GLOBAL SRCCOUNT00;
+%GLOBAL SRCCOUNT01;
+%GLOBAL TGTCOUNT00;
+%LET INPUT00=EDRRAPT.BASEL_ANALYTCL_BL_INSTRMNT_FACT;
+%LET TGT00=EDRRAPT.BASEL_RPTG_SCRD_OT_MORT_FACT;
+PROC SQL THREADS;
+DELETE FROM &DB..BASEL_RPTG_SCRD_OT_MORT_FACT
+WHERE MTH_TM_ID = &MTH_TM_ID.
+;
+quit;
+/*Fetch the Year and Month from TM_DIM to use it for query on 
+EDRRAPT.BASEL_SUBSIDIARY_ACL_LKP*/
+%macro rrap_db2yearmonth_initialize;
+proc sql noprint;
+create table _temp_yearmonth as 
+select clndr_yr, tm_yr_seq_num, '00' as charmonth, '000000' as yearmonth from 
+EDRTLRT.TM_DIM where TM_ID = &MTH_TM_ID;
+quit;
+/*Convert the integer values to char values as needed*/
+data _temp_yearmonth;
+set _temp_yearmonth;
+if tm_yr_seq_num < 10 then do;
+	charmonth='0'||put(tm_yr_seq_num,1.);
+end;
+else do;
+charmonth=tm_yr_seq_num;
+end;
+	yearmonth=clndr_yr||charmonth;
+	format yearmonth $char6.;
+run;
+/*Save the string YYYYMM for the latest MTH_TM_ID fetched from TM_DIM into a 
+variable*/
+proc sql noprint;
+select yearmonth into :yearmonth from _temp_yearmonth;
+quit;
+%mend rrap_db2yearmonth_initialize;
+
+/*This transformation accepts the target table to be loaded as an input 
+parameter
+and checks existence of data for the processing MTH_TM_ID */
+%MACRO preload_data_check;
+PROC SQL NOPRINT;
+SELECT COUNT(*) INTO :PRELOAD_DATA_COUNT FROM &TGT00. WHERE 
+MTH_TM_ID=&MTH_TM_ID;
+QUIT;
+%IF &PRELOAD_DATA_COUNT > 0 %THEN %DO;
+%PUT TARGET TABLE &TGT00. ALREADY HAS &PRELOAD_DATA_COUNT RECORDS FOR CURRENT 
+PROCESSING MONTH ID &MTH_TM_ID;
+%END;
+%MEND preload_data_check;
+
+/*This transformation generates the input and output table counts*/
+%MACRO datalog;
+PROC SQL NOPRINT;
+SELECT COUNT(*) INTO :SRCCOUNT00 FROM &INPUT00. WHERE MTH_TM_ID=&MTH_TM_ID.;
+SELECT COUNT(*) INTO :TGTCOUNT00 FROM &TGT00. WHERE MTH_TM_ID=&MTH_TM_ID.;
+QUIT;
+%MEND;
+
+/*CLEANUP MACRO*/
+/*THIS MACRO DELETES ALL TEMPORARY SAS DATASETS LISTED BY THE USER AT THE 
+SPECIFIED PATH ON AIX PLATFORM*/
+/*LIBREF SHOULD BE THE LIBREF DECLARED FOR A UNIX PATH IN THE PROGRAM*/
+/*DATASETS SHOULD BE THE LIST OF DATASETS SEPARATED BY A SINGLE SPACE*/
+%MACRO SAS_DATASET_CLEANUP (LIBREF=, DATASETS=);
+/*DELETE TEMPORARY DATASETS*/
+PROC DATASETS LIBRARY=&LIBREF NOLIST;
+DELETE &DATASETS;
+RUN;
+QUIT;
+%MEND;
+
+/*Macro for fetching the yearmonth in an integer format*/
+%rrap_db2yearmonth_initialize;
+%PUT YEARMONTH IS &YEARMONTH;
+
+/*MACRO TO FETCH THE RECORD COUNT FROM THE TARGET TABLE FOR THE PROCESSING 
+MONTH*/
+%preload_data_check;
+
+/*==========================================================================* 
+ * Step:            Conditional Start                     A57ZQ4A4.BO0002TX * 
+ * Transform:       Conditional Start                                       * 
+ * Description:     If Preload count > 0 dont load the target               * 
+ *==========================================================================*/
+
+%macro etls_conditionW375Q0SL;
+   %local etls_condition;
+   %let etls_conditionTrue = %eval(&PRELOAD_DATA_COUNT = 0);
+   %if (&etls_conditionTrue=0) %then
+   %do;
+      %put ETLS_DIAG: Condition flow did NOT execute, condition was &PRELOAD_DATA_COUNT = 0;
+      %goto exitetls_conditionW375Q0SL;
+   %end;
+   %else
+   %do;
+      %put ETLS_DIAG: Condition flow did execute, condition was &PRELOAD_DATA_COUNT = 0;
+   %end;
+
+PROC SQL;
+CREATE TABLE &INPATH.._temp_rrap_scrd_oth_mort_fact AS
+SELECT 
+SUBQ.MTH_TM_ID,
+COALESCE(SUBQ.ASST_CL_NUM,.,-1) AS ASST_CL_NUM,
+SUBQ.PIT_STAT_CD,
+SUBQ.PRD_ID AS PRD_CD,
+SUBQ.NCR_EXPSR_CL_DESC,
+SUBQ.BASEL_PRD_ABR AS BASEL_PRD_DESC,
+SUM(ADJUSTED_OS_BAL_AMT) AS ADJUSTED_OS_BAL_AMT,
+SUBQ.ASST_CL_DESC,
+SUBQ.SRC_PRD_DESC,
+&SESSIONTIME AS INSRT_PROCESS_TMSTMP,
+&SESSIONTIME AS UPDT_PROCESS_TMSTMP
+FROM 
+(
+SELECT
+FACT.MTH_TM_ID,
+DIM.NCR_EXPSR_CL_DESC,
+FACT.ASST_CL_NUM,
+FACT.PIT_STAT_CD,
+FACT.PRD_ID,
+FACT.BASEL_PRD_ABR,
+FACT.ASST_CL_DESC,
+FACT.SRC_PRD_DESC,
+SUM(FACT.ADJUSTED_OS_BAL_AMT) as ADJUSTED_OS_BAL_AMT
+FROM &INPATH..BASEL_ANALYTCL_BL_INSTRMNT_FACT FACT
+LEFT OUTER JOIN &INPATH..BASEL_EXPSR_CL_DIM DIM
+ON FACT.NCR_EXPSR_CL_KEY_VAL = DIM.NCR_EXPSR_CL_KEY_VAL
+AND INPUT(DIM.EFF_FROM_YR_MTH,6.) <= &YEARMONTH AND &YEARMONTH <= INPUT(DIM.EFF_TO_YR_MTH,6.)
+WHERE FACT.SML_BUS_F = 'N' AND FACT.CONSM_PRD_TREATMNT_CD ='A'
+AND FACT.PIT_STAT_CD IN ('CUR' ,'DEF')
+AND FACT.TRNST_EXCLSN_F = 'N' 
+AND FACT.SCRTY_TP_DESC <> 'Unsecured'
+AND FACT.SRC_SYS_CD='KS' 
+AND MTH_TM_ID=&MTH_TM_ID
+GROUP BY
+FACT.MTH_TM_ID,
+DIM.NCR_EXPSR_CL_DESC,
+FACT.ASST_CL_NUM,
+FACT.PIT_STAT_CD,
+FACT.PRD_ID,
+FACT.BASEL_PRD_ABR,
+FACT.ASST_CL_DESC,
+FACT.SRC_PRD_DESC
+UNION ALL
+SELECT
+FACT.MTH_TM_ID,
+DIM.NCR_EXPSR_CL_DESC,
+FACT.ASST_CL_NUM,
+FACT.PIT_STAT_CD,
+FACT.PRD_ID,
+FACT.BASEL_PRD_ABR,
+FACT.ASST_CL_DESC,
+FACT.SRC_PRD_DESC,
+SUM(FACT.ADJUSTED_OS_BAL_AMT /*+ FACT.UNADJUSTED_ADD_ON_BAL_AMT*/) as ADJUSTED_OS_BAL_AMT
+FROM &INPATH..BASEL_ANALYTCL_BL_INSTRMNT_FACT FACT
+LEFT OUTER JOIN EDRRAPT.BASEL_EXPSR_CL_DIM DIM
+ON FACT.NCR_EXPSR_CL_KEY_VAL = DIM.NCR_EXPSR_CL_KEY_VAL
+AND INPUT(DIM.EFF_FROM_YR_MTH,6.) <= &YEARMONTH AND &YEARMONTH <= INPUT(DIM.EFF_TO_YR_MTH,6.)
+WHERE FACT.SML_BUS_F = 'N' AND FACT.CONSM_PRD_TREATMNT_CD ='A'
+AND FACT.PIT_STAT_CD IN ('CUR' ,'DEF')
+AND FACT.TRNST_EXCLSN_F = 'N' 
+AND FACT.CCAR_EXPSR_CL_NM = 'Real Estate Secured'
+AND FACT.SRC_SYS_CD='SPL' 
+AND MTH_TM_ID=&MTH_TM_ID
+GROUP BY
+FACT.MTH_TM_ID,
+DIM.NCR_EXPSR_CL_DESC,
+FACT.ASST_CL_NUM,
+FACT.PIT_STAT_CD,
+FACT.PRD_ID,
+FACT.BASEL_PRD_ABR,
+FACT.ASST_CL_DESC,
+FACT.SRC_PRD_DESC
+) SUBQ
+GROUP BY
+SUBQ.MTH_TM_ID,
+SUBQ.NCR_EXPSR_CL_DESC,
+SUBQ.ASST_CL_NUM,
+SUBQ.PIT_STAT_CD,
+SUBQ.PRD_ID,
+SUBQ.BASEL_PRD_ABR,
+SUBQ.ASST_CL_DESC,
+SUBQ.SRC_PRD_DESC
+;
+QUIT;
+
+DATA WORK._temp_rrap_scrd_oth_mort_fact;
+RETAIN
+MTH_TM_ID ASST_CL_NUM PIT_STAT_CD PRD_CD NCR_EXPSR_CL_DESC BASEL_PRD_DESC 
+ADJUSTED_OS_BAL_AMT 
+ASST_CL_DESC SRC_PRD_DESC INSRT_PROCESS_TMSTMP UPDT_PROCESS_TMSTMP;
+SET &INPATH.._temp_rrap_scrd_oth_mort_fact;
+RUN;
+
+%PUT >>> db= &db.;
+
+PROC SQL THREADS;
+DELETE FROM &DB..BASEL_RPTG_SCRD_OT_MORT_FACT
+WHERE MTH_TM_ID = &MTH_TM_ID.
+;
+INSERT INTO &DB..BASEL_RPTG_SCRD_OT_MORT_FACT (BULKLOAD=YES BL_METHOD=CLILOAD)
+SELECT * 
+FROM WORK._temp_rrap_scrd_oth_mort_fact
+;
+QUIT;
+
+%datalog;
+%PUT 
+PROCESSING MONTH IS &MTH_TM_ID 
+YEARMONTH IS &YEARMONTH 
+PRELOAD DATA COUNT IN TARGET FOR &MTH_TM_ID IS &PRELOAD_DATA_COUNT 
+&INPUT00. COUNT IS &SRCCOUNT00 
+&TGT00. COUNT IS &TGTCOUNT00;
+
+%SAS_DATASET_CLEANUP(LIBREF=INPATH,DATASETS=_temp_rrap_scrd_oth_mort_fact);
+
+%exitetls_conditionW375Q0SL:
+%mend etls_conditionW375Q0SL;
+
+%etls_conditionW375Q0SL;
+%PUT etls_endTime = %sysfunc(datetime(),datetime.);

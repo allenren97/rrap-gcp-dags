@@ -1,0 +1,3 @@
+#The Second line is the email list for the RMA list; the third line is the email list for the CMF list
+"frank.russo@scotiabank.com" "liliya.kuznetsova@scotiabank.com" "Nelly.Selitser@scotiabank.com" "wanda.kemp@scotiabank.com" "Derek.Landau@scotiabank.com" "prashan.vethanayagam@scotiabank.com"
+"zulfiqar.hyder@scotiabank.com" "Carol.Gardner@scotiabank.com" "frank.russo@scotiabank.com" "liliya.kuznetsova@scotiabank.com" "Nelly.Selitser@scotiabank.com" "wanda.kemp@scotiabank.com" "Derek.Landau@scotiabank.com" "prashan.vethanayagam@scotiabank.com"

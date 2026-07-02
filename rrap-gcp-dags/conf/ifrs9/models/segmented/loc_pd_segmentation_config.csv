@@ -1,0 +1,15 @@
+Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,PIT_STATUS_CROSS_DEFAULT_ORIG,CONSM_PRD_TREATMNT_CD,CONSM_SCORECRD_EXCLSN_F,Transactor_f,Output
+Defaulted Accounts,,,DEF,,,,99
+Defaulted Accounts,>=0,,DEF,,,,99
+Special Segment,,,,A,Y,,98
+Transactor Segment,>=0,,not in ('DEF'),,,T,10
+Transactor Segment,,,not in ('DEF'),,,T,10
+>=837,>=837,,,,,not in ('T'),1
+"[793, 836]",>=793,<=836,,,,not in ('T'),2
+"[763, 792]",>=763,<=792,,,,not in ('T'),3
+"[743, 762]",>=743,<=762,,,,not in ('T'),4
+"[723, 742]",>=723,<=742,,,,not in ('T'),5
+"[687, 722]",>=687,<=722,,,,not in ('T'),6
+"[645, 686]",>=645,<=686,,,,not in ('T'),7
+"[603, 644]",>=603,<=644,,,,not in ('T'),8
+<=602,,<=602,,,,not in ('T'),9

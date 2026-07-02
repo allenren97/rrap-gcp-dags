@@ -1,0 +1,6 @@
+recursive-include dags *
+recursive-include conf *
+recursive-include functions *
+recursive-include bin *
+include ./requirements.txt
+include ./deploy.sh

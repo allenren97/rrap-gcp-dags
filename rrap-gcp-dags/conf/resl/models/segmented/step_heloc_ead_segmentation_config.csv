@@ -1,0 +1,8 @@
+﻿Description,CALC_SCORE_LOWER,CALC_SCORE_UPPER,MODEL_EXCL_F,Written_Out_F,CR_LMT_AMT,TOT_NEW_BAL_AMT,PIT_STATUS_STEP,Output
+Defaulted and Charged-off PIT Status post-exclusion criteria,,,,,,,DEF,99
+Special Segment,,,Y,,,,,98
+Special Segment,,,,Y,,,,98
+Special Segment,,,,,<=0,<=0,,98
+Total Score <=895,,<=895,,,,,,1
+Total Score > 895 AND Total Score <= 937,>895,<=937,,,,,,2
+Total Score > 937,>937,,,,,,,3

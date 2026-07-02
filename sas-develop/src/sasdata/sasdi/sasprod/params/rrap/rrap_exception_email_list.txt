@@ -1,0 +1,3 @@
+# The second line is the email list for normal report; the third line is the email list for normal report above SI threshold
+"RMA-Dev-Support@scotiabank.com" "RMAModelCompliance@scotiabank.com" "RMA-Quality@scotiabank.com" "edwsupport@scotiabank.com" "GRT-Model-Support@scotiabank.com"
+"RMA-Dev-Support@scotiabank.com" "RMAModelCompliance@scotiabank.com" "RMA-Quality@scotiabank.com" "edwsupport@scotiabank.com" "GRT-Model-Support@scotiabank.com"

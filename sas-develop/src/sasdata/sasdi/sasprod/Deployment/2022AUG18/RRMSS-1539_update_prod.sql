@@ -1,0 +1,7 @@
+/* RRMSS-1539
+Below query should update only 1 record */
+
+UPDATE EDRTLRP1D.BASEL_REVLVNG_CR_MTH_SNAPSHOT SET MTH_TM_ID =-19396 WHERE mth_tm_id=19396 AND REVLVNG_CR_BASEL_MTH_SNAPSHOT_ID=3306307536 AND BASEL_ACCT_ID =-1
+
+/* After UPDATE, below select should return 1 record */
+select * from EDRTLRP1D.BASEL_REVLVNG_CR_MTH_SNAPSHOT where MTH_TM_ID =-19396 

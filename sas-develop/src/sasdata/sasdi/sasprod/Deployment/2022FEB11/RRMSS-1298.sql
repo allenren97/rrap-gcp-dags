@@ -1,0 +1,19 @@
+-- Step 1. Back up existing production data
+CREATE TABLE edrtlrp1d.BASEL_PSNL_LN_ANL_BL_INST_FACT_BKUP_20220210 AS (SELECT * FROM edrtlrp1d.BASEL_PSNL_LN_ANL_BL_INST_FACT WHERE mth_tm_id IN (18916,18956,18996,19036)) WITH DATA; 
+
+CREATE TABLE edrtlrp1d.DT4_RPTG_DRVD_VARS_BKUP_20220210 AS (SELECT * FROM edrtlrp1d.DT4_RPTG_DRVD_VARS WHERE src_sys_cd = 'SPL' AND mth_tm_id IN (18916,18956,18996,19036)) WITH DATA; 
+
+-- Step 2. Delete data from prod (which will be replaced by patched data in Step 3)
+
+DELETE FROM edrtlrp1d.BASEL_PSNL_LN_ANL_BL_INST_FACT WHERE mth_tm_id IN (18916,18956,18996,19036); COMMIT; 
+DELETE FROM edrtlrp1d.DT4_RPTG_DRVD_VARS WHERE src_sys_cd = 'SPL' AND mth_tm_id IN (18916,18956,18996,19036); COMMIT; 
+
+
+-- Step 3. Copy the following two tables from UAT server into the prod IIAS server.
+
+EDRTLRFRGD3D.DTL_DT4_RPTG_DRVD_VARS
+EDRTLRFRGD3D.DTL_PSNL_LN_ANL_BL_INST_FACT
+-- Step 4. Insert data from UAT tables in step 3 into live prod tables. 
+
+INSERT INTO edrtlrp1d.BASEL_PSNL_LN_ANL_BL_INST_FACT SELECT * FROM (STEP3).DTL_PSNL_LN_ANL_BL_INST_FACT; COMMIT;
+INSERT INTO edrtlrp1d.DT4_RPTG_DRVD_VARS SELECT * FROM (STEP3).DTL_DT4_RPTG_DRVD_VARS; COMMIT;

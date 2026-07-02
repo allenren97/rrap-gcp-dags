@@ -1,0 +1,10 @@
+build:
+  template: python:generic
+  substitutions:
+    _SONAR_SCAN_STRATEGY: SKIP # Setup python test cases to enable Sonar scanning
+    _CHECKMARX_SCAN_STRATEGY: RUN_NOT_FAIL
+    _BLACKDUCK_SCAN_STRATEGY: RUN_NOT_FAIL # Setup BlackDuck project space to enable -> TRIGGER_ONLY
+    _VERSION_STRATEGY: DEV_TEAM
+    _IS_PUBLISHING_ARTIFACT: 1
+    _FORTIFY_INCLUDE: "**/*"
+
