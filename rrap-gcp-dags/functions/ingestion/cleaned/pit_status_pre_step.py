@@ -3,6 +3,10 @@ Rewrite of J_RRII_KS10_0000_PIT_STATUS_PRE_STEP_CROSS_DFLT.sas
 
 Loads ingestion.PIT_STATUS_PRE_STEP for KS, SPL, and MOR and applies Step
 cross-default overrides consumed by J_RRII_KS10_2103_BASEL_REVLVNG_CR_BASE_DRVD_VARS.
+
+Export tasks (export_ks/spl/mor) materialize parquet; duckdb_load unions them
+into the target table. Names use export_* (not duckdb_export_*) so the DAG
+generator applies @task.export for parquet output.
 """
 
 UPSTREAM_ASSET = [
@@ -19,10 +23,11 @@ UPSTREAM_ASSET = [
 DOWNSTREAM_ASSET = "ingestion.PIT_STATUS_PRE_STEP"
 
 DEPENDENCIES = {
-    "duckdb_delete": ["duckdb_load_ks", "duckdb_load_spl", "duckdb_load_mor"],
-    "duckdb_load_ks": ["duckdb_update_cross_default"],
-    "duckdb_load_spl": ["duckdb_update_cross_default"],
-    "duckdb_load_mor": ["duckdb_update_cross_default"],
+    "duckdb_delete": ["export_ks", "export_spl", "export_mor"],
+    "export_ks": ["duckdb_load"],
+    "export_spl": ["duckdb_load"],
+    "export_mor": ["duckdb_load"],
+    "duckdb_load": ["duckdb_update_cross_default"],
 }
 
 
@@ -36,20 +41,9 @@ def duckdb_delete(
     pass
 
 
-def duckdb_load_ks(
+def export_ks(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
-    INSERT INTO {DOWNSTREAM_ASSET} (
-        MTH_TM_ID,
-        SRC_SYS_CD,
-        BASEL_ACCT_ID,
-        STEP_PLN_SNAPSHOT_ID,
-        STEP_PLN_AGRMNT_NUM,
-        PIT_STATUS_PRE_STEP,
-        STEP_DFLT_F,
-        INSRT_PROCESS_TMSTMP,
-        UPDT_PROCESS_TMSTMP
-    )
     WITH
         ymt AS (
             SELECT STRFTIME(TM_LVL_END_DT, '%Y%m') AS yrmth
@@ -225,20 +219,9 @@ def duckdb_load_ks(
     pass
 
 
-def duckdb_load_spl(
+def export_spl(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
-    INSERT INTO {DOWNSTREAM_ASSET} (
-        MTH_TM_ID,
-        SRC_SYS_CD,
-        BASEL_ACCT_ID,
-        STEP_PLN_SNAPSHOT_ID,
-        STEP_PLN_AGRMNT_NUM,
-        PIT_STATUS_PRE_STEP,
-        STEP_DFLT_F,
-        INSRT_PROCESS_TMSTMP,
-        UPDT_PROCESS_TMSTMP
-    )
     SELECT
         MTH_TM_ID,
         'SPL' AS SRC_SYS_CD,
@@ -266,22 +249,9 @@ def duckdb_load_spl(
     pass
 
 
-def duckdb_load_mor(
+def export_mor(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
-    INSERT INTO {DOWNSTREAM_ASSET} (
-        MTH_TM_ID,
-        SRC_SYS_CD,
-        BASEL_ACCT_ID,
-        MORT_NUM,
-        MORT_PROCESS_DATE,
-        STEP_PLN_SNAPSHOT_ID,
-        STEP_PLN_AGRMNT_NUM,
-        PIT_STATUS_PRE_STEP,
-        STEP_DFLT_F,
-        INSRT_PROCESS_TMSTMP,
-        UPDT_PROCESS_TMSTMP
-    )
     SELECT
         a.TM_ID AS MTH_TM_ID,
         'MOR' AS SRC_SYS_CD,
@@ -329,6 +299,24 @@ def duckdb_load_mor(
         ON a.MORT_NUM = b.MORT_NUM
        AND a.TM_ID = b.MTH_TM_ID
     WHERE a.TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+    """,
+):
+    pass
+
+
+def duckdb_load(
+    duckdb_conn_id="duckdb-conn",
+    sql=f"""
+    INSERT INTO {DOWNSTREAM_ASSET} BY NAME
+    SELECT *
+    FROM read_parquet(
+        [
+            '{{{{ task_instance.xcom_pull(task_ids="cleaned__pit_status_pre_step.export_ks", key="parquet") }}}}',
+            '{{{{ task_instance.xcom_pull(task_ids="cleaned__pit_status_pre_step.export_spl", key="parquet") }}}}',
+            '{{{{ task_instance.xcom_pull(task_ids="cleaned__pit_status_pre_step.export_mor", key="parquet") }}}}'
+        ],
+        union_by_name=true
+    )
     """,
 ):
     pass
