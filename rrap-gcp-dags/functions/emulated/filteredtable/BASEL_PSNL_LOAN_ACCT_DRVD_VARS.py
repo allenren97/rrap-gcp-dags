@@ -22,6 +22,7 @@ def duckdb_delete(
     sql=f"""
     DELETE FROM {DOWNSTREAM_ASSET}
     WHERE OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+      AND STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     """,
 ):
     pass
@@ -52,6 +53,7 @@ def duckdb_load(
     )
     SELECT
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
         MTH_TM_ID,
         BASEL_ACCT_ID,
         PRIM_BASEL_CUST_ID AS BASEL_CUST_ID,

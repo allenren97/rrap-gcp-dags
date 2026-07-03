@@ -27,6 +27,7 @@ def duckdb_delete(
     sql=f"""
     DELETE FROM {DOWNSTREAM_ASSET}
     WHERE OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+      AND STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     """,
 ):
     pass
@@ -160,7 +161,8 @@ def duckdb_load(
                 PIT_STATUS_V2 AS PIT_STATUS_LAG,
                 CONS_DFT_MTH_CNT AS CONS_MTHS_DEFAULT_LAG
             FROM {DOWNSTREAM_ASSET}
-            WHERE MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="prev_mth_tm_id") }}}}
+            WHERE STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
+              AND MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="prev_mth_tm_id") }}}}
         ),
         with_cons_dft AS (
             SELECT
@@ -317,6 +319,7 @@ def duckdb_load(
         )
     SELECT
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
         BASEL_ACCT_ID,
         MTH_TM_ID,
         PIT_STATUS AS PIT_STATUS_V2,

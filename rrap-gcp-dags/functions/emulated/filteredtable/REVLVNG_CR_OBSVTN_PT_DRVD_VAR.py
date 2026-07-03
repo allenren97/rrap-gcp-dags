@@ -98,8 +98,8 @@ def duckdb_delete(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
     DELETE FROM {DOWNSTREAM_ASSET}
-    WHERE PROCESS_MTH_TM_ID =
-        {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+    WHERE OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+      AND STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     """,
 ):
     pass
@@ -302,6 +302,8 @@ def duckdb_load(
         ),
         pdead_rows AS (
             SELECT
+                '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+                '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
                 a.MTH_TM_ID AS OBSVTN_MTH_TM_ID,
                 b.BASEL_ACCT_ID,
                 b.LAST_NEW_DEFAULT_OS_BAL_AMT AS LAST_NEW_DFT_BAL_AMT,
@@ -327,6 +329,8 @@ def duckdb_load(
         ),
         lgd_rows AS (
             SELECT
+                '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+                '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
                 a.MTH_TM_ID AS OBSVTN_MTH_TM_ID,
                 b.BASEL_ACCT_ID,
                 b.LAST_NEW_DEFAULT_OS_BAL_AMT AS LAST_NEW_DFT_BAL_AMT,
