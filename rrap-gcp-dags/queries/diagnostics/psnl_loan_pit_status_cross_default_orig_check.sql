@@ -8,7 +8,30 @@
 --   LGDND window OBSN_DTs: 2025-01-31 .. 2026-01-31
 
 -- ---------------------------------------------------------------------------
--- 1) Monthly coverage: one partition per month-end, non-zero row count
+-- 0) Feature vs 2104 side-by-side (run this first if features "have data")
+--    If feature_cur/def >> 0 but drvd_null >> 0 -> re-run 2104 for that month
+-- ---------------------------------------------------------------------------
+SELECT
+    t.TM_LVL_END_DT AS obsn_dt,
+    COUNT(pit.BASEL_ACCT_ID) AS feature_rows,
+    COUNT(*) FILTER (WHERE TRIM(pit.PIT_STATUS_CROSS_DEFAULT_ORIG) = 'CUR') AS feature_cur,
+    COUNT(*) FILTER (WHERE TRIM(pit.PIT_STATUS_CROSS_DEFAULT_ORIG) = 'DEF') AS feature_def,
+    COUNT(d.BASEL_ACCT_ID) AS drvd_vars_2_rows,
+    COUNT(*) FILTER (WHERE d.PIT_STATUS_V2 IS NULL) AS drvd_null_pit,
+    COUNT(*) FILTER (WHERE UPPER(TRIM(d.PIT_STATUS_V2)) = 'CUR') AS drvd_cur,
+    COUNT(*) FILTER (WHERE UPPER(TRIM(d.PIT_STATUS_V2)) = 'DEF') AS drvd_def
+FROM ingestion.TM_DIM t
+LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+    ON pit.OBSN_DT = t.TM_LVL_END_DT
+   AND pit.SRC_SYS_CD = 'SPL'
+LEFT JOIN emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 d
+    ON d.MTH_TM_ID = t.TM_ID
+   AND d.STREAM = 'NON_RESL'
+WHERE TRIM(t.TM_LVL) = 'Month'
+  AND t.TM_LVL_END_DT BETWEEN DATE '2022-01-31' AND DATE '2026-01-31'
+GROUP BY 1
+ORDER BY 1;
+
 -- ---------------------------------------------------------------------------
 SELECT
     t.TM_LVL_END_DT AS obsn_dt,
