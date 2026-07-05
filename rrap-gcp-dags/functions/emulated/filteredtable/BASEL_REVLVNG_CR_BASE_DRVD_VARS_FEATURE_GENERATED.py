@@ -7,9 +7,8 @@ parquet exports (one per major CTE) to compare wall-time vs a monolithic query:
   export_base              — snapshot keys / HELOC
   export_joined            — base + features + lookup joins
   export_derived           — PIT pre-step, CSEF, CONSM_SCORECRD_EXCLSN_F
-  export_with_pit_override — PIT_STATUS_PRE_STEP override
-  export_tot_expsr         — customer/product exposure aggregate
-  export_result            — exposure flag + final projection
+  export_with_pit_override — PIT override, narrow projection for downstream
+  export_result            — tot_expsr + exposure flag + final projection (single scan)
   duckdb_load              — insert into DuckLake
 
 Requires the stream features DAG to have run for the process month.
@@ -49,8 +48,7 @@ DEPENDENCIES = {
     "export_base": ["export_joined"],
     "export_joined": ["export_derived"],
     "export_derived": ["export_with_pit_override"],
-    "export_with_pit_override": ["export_tot_expsr", "export_result"],
-    "export_tot_expsr": ["export_result"],
+    "export_with_pit_override": ["export_result"],
     "export_result": ["duckdb_load"],
 }
 
@@ -273,50 +271,48 @@ def export_derived(
 def export_with_pit_override(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
-    WITH derived AS (
-        SELECT * FROM read_parquet(
-            '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_derived", key="parquet") }}}}'
+    WITH
+        derived AS (
+            SELECT * FROM read_parquet(
+                '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_derived", key="parquet") }}}}'
+            )
+        ),
+        pit_override AS (
+            SELECT
+                BASEL_ACCT_ID,
+                CROSS_DFLT_PIT_STATUS
+            FROM ingestion.PIT_STATUS_PRE_STEP
+            WHERE MTH_TM_ID = {_MTH_TM_ID}
+              AND SRC_SYS_CD = 'KS'
+              AND CROSS_DFLT_PIT_OVERRIDE_F = 'Y'
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY BASEL_ACCT_ID ORDER BY STEP_PLN_SNAPSHOT_ID
+            ) = 1
         )
-    )
     SELECT
-        d.* EXCLUDE (PIT_STAT_VER_2_CD_PRE),
-        CASE
-            WHEN pit.CROSS_DFLT_PIT_OVERRIDE_F = 'Y'
-            THEN pit.CROSS_DFLT_PIT_STATUS
-            ELSE d.PIT_STAT_VER_2_CD_PRE
-        END AS PIT_STAT_VER_2_CD
+        d.MTH_TM_ID,
+        d.BASEL_ACCT_ID,
+        d.BASEL_CUST_ID,
+        d.ACCT_NUM,
+        d.BASEL_PRD_CD,
+        d.BASEL_PRD_DESC,
+        d.CONSM_SCORECRD_EXCLSN_F,
+        d.CONSM_PRD_TREATMNT_CD,
+        d.HELOC_F,
+        COALESCE(pit.CROSS_DFLT_PIT_STATUS, d.PIT_STAT_VER_2_CD_PRE) AS PIT_STAT_VER_2_CD,
+        d.REVISED_EXPSR_AMT,
+        d.RS_F,
+        d.SML_BUS_F,
+        d.STEP_CD,
+        d.TRNST_EXCLSN_F,
+        d.ACCRL_STAT_F,
+        d.LTV_TP_CD,
+        d.BNKRPY_F,
+        d.PIT_STAT_VER_2_CD90,
+        d.PIT_STAT_VER_2_CD180
     FROM derived d
-    LEFT JOIN ingestion.PIT_STATUS_PRE_STEP pit
+    LEFT JOIN pit_override pit
         ON d.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
-       AND pit.MTH_TM_ID = {_MTH_TM_ID}
-       AND pit.SRC_SYS_CD = 'KS'
-       AND pit.CROSS_DFLT_PIT_OVERRIDE_F = 'Y'
-    """,
-):
-    pass
-
-
-def export_tot_expsr(
-    duckdb_conn_id="duckdb-conn",
-    sql=f"""
-    WITH with_pit_override AS (
-        SELECT * FROM read_parquet(
-            '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_with_pit_override", key="parquet") }}}}'
-        )
-    )
-    SELECT
-        BASEL_CUST_ID,
-        BASEL_PRD_CD,
-        SUM(REVISED_EXPSR_AMT) AS TOT_EXPSR
-    FROM with_pit_override
-    WHERE BASEL_CUST_ID > 0
-      AND CONSM_PRD_TREATMNT_CD = 'A'
-      AND HELOC_F = 'N'
-      AND PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-      AND SML_BUS_F = 'N'
-      AND TRNST_EXCLSN_F = 'N'
-      AND BASEL_PRD_CD IN ('CC', 'LOC', 'SL A')
-    GROUP BY BASEL_CUST_ID, BASEL_PRD_CD
     """,
 ):
     pass
@@ -335,96 +331,99 @@ def export_result(
                AND b.TM_LVL_END_DT BETWEEN a.EFF_FROM_YR_MTH AND a.EFF_TO_YR_MTH
             LIMIT 1
         ),
-        with_pit_override AS (
+        accounts AS (
             SELECT * FROM read_parquet(
                 '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_with_pit_override", key="parquet") }}}}'
             )
         ),
         tot_expsr AS (
-            SELECT * FROM read_parquet(
-                '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_tot_expsr", key="parquet") }}}}'
-            )
-        ),
-        with_expsr_flag AS (
             SELECT
-                a.*,
-                CASE
-                    WHEN a.CONSM_PRD_TREATMNT_CD = 'A'
-                         AND a.HELOC_F = 'N'
-                         AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-                         AND a.SML_BUS_F = 'N'
-                         AND a.TRNST_EXCLSN_F = 'N'
-                         AND te.TOT_EXPSR IS NULL
-                    THEN ''
-                    WHEN a.CONSM_PRD_TREATMNT_CD = 'A'
-                         AND a.HELOC_F = 'N'
-                         AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-                         AND a.SML_BUS_F = 'N'
-                         AND a.TRNST_EXCLSN_F = 'N'
-                         AND te.TOT_EXPSR > (SELECT THRSHLD FROM thrshld)
-                    THEN 'Y'
-                    WHEN a.CONSM_PRD_TREATMNT_CD = 'A'
-                         AND a.HELOC_F = 'N'
-                         AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-                         AND a.SML_BUS_F = 'N'
-                         AND a.TRNST_EXCLSN_F = 'N'
-                    THEN 'N'
-                    ELSE NULL
-                END AS TOTAL_EXPSR_ABOVE_LMT_F_BASE
-            FROM with_pit_override a
-            LEFT JOIN tot_expsr te
-                ON a.BASEL_CUST_ID = te.BASEL_CUST_ID
-               AND a.BASEL_PRD_CD = te.BASEL_PRD_CD
-               AND a.CONSM_PRD_TREATMNT_CD = 'A'
-               AND a.HELOC_F = 'N'
-               AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-               AND a.SML_BUS_F = 'N'
-               AND a.TRNST_EXCLSN_F = 'N'
+                BASEL_CUST_ID,
+                BASEL_PRD_CD,
+                SUM(REVISED_EXPSR_AMT) AS TOT_EXPSR
+            FROM accounts
+            WHERE BASEL_CUST_ID > 0
+              AND CONSM_PRD_TREATMNT_CD = 'A'
+              AND HELOC_F = 'N'
+              AND PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
+              AND SML_BUS_F = 'N'
+              AND TRNST_EXCLSN_F = 'N'
+              AND BASEL_PRD_CD IN ('CC', 'LOC', 'SL A')
+            GROUP BY BASEL_CUST_ID, BASEL_PRD_CD
         )
     SELECT
         '{_RUNDATE}' AS OBSN_DT,
         '{_STREAM}' AS STREAM,
-        MTH_TM_ID,
-        BASEL_ACCT_ID,
-        BASEL_CUST_ID,
-        ACCT_NUM,
-        BASEL_PRD_CD,
-        BASEL_PRD_DESC,
-        CONSM_SCORECRD_EXCLSN_F,
-        CONSM_PRD_TREATMNT_CD,
-        HELOC_F,
-        PIT_STAT_VER_2_CD,
-        REVISED_EXPSR_AMT,
-        RS_F,
-        SML_BUS_F,
-        STEP_CD,
-        TRNST_EXCLSN_F,
-        ACCRL_STAT_F,
-        LTV_TP_CD,
-        BNKRPY_F,
-        PIT_STAT_VER_2_CD90,
-        PIT_STAT_VER_2_CD180,
+        a.MTH_TM_ID,
+        a.BASEL_ACCT_ID,
+        a.BASEL_CUST_ID,
+        a.ACCT_NUM,
+        a.BASEL_PRD_CD,
+        a.BASEL_PRD_DESC,
+        a.CONSM_SCORECRD_EXCLSN_F,
+        a.CONSM_PRD_TREATMNT_CD,
+        a.HELOC_F,
+        a.PIT_STAT_VER_2_CD,
+        a.REVISED_EXPSR_AMT,
+        a.RS_F,
+        a.SML_BUS_F,
+        a.STEP_CD,
+        a.TRNST_EXCLSN_F,
+        a.ACCRL_STAT_F,
+        a.LTV_TP_CD,
+        a.BNKRPY_F,
+        a.PIT_STAT_VER_2_CD90,
+        a.PIT_STAT_VER_2_CD180,
         CASE
-            WHEN BASEL_CUST_ID = -1
-                 AND CONSM_PRD_TREATMNT_CD = 'A'
-                 AND HELOC_F = 'N'
-                 AND PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-                 AND SML_BUS_F = 'N'
-                 AND TRNST_EXCLSN_F = 'N'
-                 AND BASEL_PRD_CD IN ('CC', 'LOC', 'SL A')
+            WHEN a.BASEL_CUST_ID = -1
+                 AND a.CONSM_PRD_TREATMNT_CD = 'A'
+                 AND a.HELOC_F = 'N'
+                 AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
+                 AND a.SML_BUS_F = 'N'
+                 AND a.TRNST_EXCLSN_F = 'N'
+                 AND a.BASEL_PRD_CD IN ('CC', 'LOC', 'SL A')
             THEN CASE
-                WHEN REVISED_EXPSR_AMT > (SELECT THRSHLD FROM thrshld) THEN 'Y'
+                WHEN a.REVISED_EXPSR_AMT > t.THRSHLD THEN 'Y'
                 ELSE 'N'
             END
-            WHEN CONSM_PRD_TREATMNT_CD = 'A'
-                 AND (HELOC_F = 'Y' OR BASEL_PRD_CD IN ('SL', 'SL B'))
-                 AND PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-                 AND SML_BUS_F = 'N'
-                 AND TRNST_EXCLSN_F = 'N'
+            WHEN a.CONSM_PRD_TREATMNT_CD = 'A'
+                 AND (a.HELOC_F = 'Y' OR a.BASEL_PRD_CD IN ('SL', 'SL B'))
+                 AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
+                 AND a.SML_BUS_F = 'N'
+                 AND a.TRNST_EXCLSN_F = 'N'
             THEN 'N'
-            ELSE TOTAL_EXPSR_ABOVE_LMT_F_BASE
+            WHEN a.CONSM_PRD_TREATMNT_CD = 'A'
+                 AND a.HELOC_F = 'N'
+                 AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
+                 AND a.SML_BUS_F = 'N'
+                 AND a.TRNST_EXCLSN_F = 'N'
+                 AND te.TOT_EXPSR IS NULL
+            THEN ''
+            WHEN a.CONSM_PRD_TREATMNT_CD = 'A'
+                 AND a.HELOC_F = 'N'
+                 AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
+                 AND a.SML_BUS_F = 'N'
+                 AND a.TRNST_EXCLSN_F = 'N'
+                 AND te.TOT_EXPSR > t.THRSHLD
+            THEN 'Y'
+            WHEN a.CONSM_PRD_TREATMNT_CD = 'A'
+                 AND a.HELOC_F = 'N'
+                 AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
+                 AND a.SML_BUS_F = 'N'
+                 AND a.TRNST_EXCLSN_F = 'N'
+            THEN 'N'
+            ELSE NULL
         END AS TOTAL_EXPSR_ABOVE_LMT_F
-    FROM with_expsr_flag
+    FROM accounts a
+    CROSS JOIN thrshld t
+    LEFT JOIN tot_expsr te
+        ON a.BASEL_CUST_ID = te.BASEL_CUST_ID
+       AND a.BASEL_PRD_CD = te.BASEL_PRD_CD
+       AND a.CONSM_PRD_TREATMNT_CD = 'A'
+       AND a.HELOC_F = 'N'
+       AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
+       AND a.SML_BUS_F = 'N'
+       AND a.TRNST_EXCLSN_F = 'N'
     """,
 ):
     pass
