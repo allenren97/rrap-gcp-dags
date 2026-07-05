@@ -80,30 +80,34 @@ def export_result(
                 END AS delq_days_2
             FROM with_delq d
         ),
+        with_delq_days_clean AS (
+            SELECT * EXCLUDE (temp_delq_days_2)
+            FROM with_delq_days
+        ),
         with_delq_mth AS (
             SELECT
-                d.* EXCLUDE (temp_delq_days_2),
+                *,
                 CASE
-                    WHEN d.delq_days_2 = 0 THEN 0
-                    WHEN UPPER(TRIM(COALESCE(d.FLOAT_IND, ''))) IN ('W', 'B', 'S')
+                    WHEN delq_days_2 = 0 THEN 0
+                    WHEN UPPER(TRIM(COALESCE(FLOAT_IND, ''))) IN ('W', 'B', 'S')
                     THEN GREATEST(
                         DATE_DIFF(
                             'month',
-                            DATE_TRUNC('day', d.UNPD_WKL_PAY_DATE),
-                            DATE_TRUNC('day', d.PROCESS_DATE)
+                            DATE_TRUNC('day', UNPD_WKL_PAY_DATE),
+                            DATE_TRUNC('day', PROCESS_DATE)
                         ) + 1,
                         0
                     )
                     ELSE GREATEST(
                         DATE_DIFF(
                             'month',
-                            DATE_TRUNC('day', d.UNPD_MTH_PAY_DATE),
-                            DATE_TRUNC('day', d.PROCESS_DATE)
+                            DATE_TRUNC('day', UNPD_MTH_PAY_DATE),
+                            DATE_TRUNC('day', PROCESS_DATE)
                         ) + 1,
                         0
                     )
                 END AS temp_delq_months_2
-            FROM with_delq_days d
+            FROM with_delq_days_clean
         ),
         with_status AS (
             SELECT
