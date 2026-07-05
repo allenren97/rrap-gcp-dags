@@ -83,7 +83,6 @@ def export_result(
         with_delq_mth AS (
             SELECT
                 d.* EXCLUDE (temp_delq_days_2),
-                d.delq_days_2,
                 CASE
                     WHEN d.delq_days_2 = 0 THEN 0
                     WHEN UPPER(TRIM(COALESCE(d.FLOAT_IND, ''))) IN ('W', 'B', 'S')
@@ -104,7 +103,7 @@ def export_result(
                         0
                     )
                 END AS temp_delq_months_2
-            FROM with_delq d
+            FROM with_delq_days d
         ),
         with_status AS (
             SELECT
@@ -118,7 +117,7 @@ def export_result(
             LEFT JOIN features.MORT_NUM mn
                 ON mn.SRC_SYS_CD = 'MOR'
                AND mn.OBSN_DT = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-               AND m.MORTGAGE_NO = mn.MORT_NUM
+               AND m.MORTGAGE_NO = TRY_CAST(mn.MORT_NUM AS BIGINT)
             LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
                 ON pit.SRC_SYS_CD = 'MOR'
                AND pit.OBSN_DT = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'

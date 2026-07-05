@@ -51,7 +51,7 @@ FROM ingestion.MORTGAGE_HIST h
 LEFT JOIN features.MORT_NUM mn
     ON mn.SRC_SYS_CD = 'MOR'
    AND mn.OBSN_DT = DATE '2026-01-31'
-   AND h.MORTGAGE_NO = mn.MORT_NUM
+   AND h.MORTGAGE_NO = TRY_CAST(mn.MORT_NUM AS BIGINT)
 LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
     ON pit.SRC_SYS_CD = 'MOR'
    AND pit.OBSN_DT = DATE '2026-01-31'
@@ -63,7 +63,7 @@ FROM ingestion.MORTGAGE_HIST h
 INNER JOIN features.MORT_NUM mn
     ON mn.SRC_SYS_CD = 'MOR'
    AND mn.OBSN_DT = DATE '2026-01-31'
-   AND h.MORTGAGE_NO = mn.MORT_NUM
+   AND h.MORTGAGE_NO = TRY_CAST(mn.MORT_NUM AS BIGINT)
 INNER JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
     ON pit.SRC_SYS_CD = 'MOR'
    AND pit.OBSN_DT = DATE '2026-01-31'
@@ -107,7 +107,6 @@ WITH
     with_delq_mth AS (
         SELECT
             d.* EXCLUDE (temp_delq_days_2),
-            d.delq_days_2,
             CASE
                 WHEN d.delq_days_2 = 0 THEN 0
                 WHEN UPPER(TRIM(COALESCE(d.FLOAT_IND, ''))) IN ('W', 'B', 'S')
@@ -133,7 +132,7 @@ WITH
         LEFT JOIN features.MORT_NUM mn
             ON mn.SRC_SYS_CD = 'MOR'
            AND mn.OBSN_DT = DATE '2026-01-31'
-           AND h.MORTGAGE_NO = mn.MORT_NUM
+           AND h.MORTGAGE_NO = TRY_CAST(mn.MORT_NUM AS BIGINT)
         LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
             ON pit.SRC_SYS_CD = 'MOR'
            AND pit.OBSN_DT = DATE '2026-01-31'
