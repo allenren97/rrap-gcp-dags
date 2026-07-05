@@ -5,16 +5,17 @@ Builds emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS:
   export_result — compute full result set to parquet
   duckdb_load   — insert parquet into DuckLake
 
-Optimizations vs the monolithic version:
-  - TRIM once on snapshot / lookup keys; join on pre-trimmed columns
-  - Deduplicate small lookups only (not the full account population)
-  - Separate compute (export) from DuckLake write (load)
+PIT_STAT_VER_2_CD = features.PIT_STATUS_CROSS_DEFAULT_ORIG.
+PIT_STAT_VER_2_CD90 / CD180 from features.PIT_STAT_VER_2_CD90 / CD180.
+Other derived columns (exposure, exclusions, thresholds) remain inline.
 """
 
 UPSTREAM_ASSET = [
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
-    "ingestion.PIT_STATUS_PRE_STEP",
     "ingestion.TM_DIM",
+    "features.PIT_STAT_VER_2_CD90",
+    "features.PIT_STAT_VER_2_CD180",
+    "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
     "reference.BLOCK_RECL_LKP",
     "reference.BLOCK_RECL_CLS_RSN_LKP",
     "reference.CHRG_OFF_LKP",
@@ -27,6 +28,8 @@ UPSTREAM_ASSET = [
 DOWNSTREAM_ASSET = "emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS"
 
 _TASK_GROUP = "filteredtable__BASEL_REVLVNG_CR_BASE_DRVD_VARS"
+
+_RUNDATE = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
 
 DEPENDENCIES = {
     "duckdb_delete": ["export_result"],
@@ -53,26 +56,6 @@ def export_result(
             SELECT STRFTIME(TM_LVL_END_DT, '%Y%m') AS yrmth
             FROM ingestion.TM_DIM
             WHERE TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
-        ),
-        lk_bnkrpy_block AS (
-            SELECT BLOCK_RECL_CD
-            FROM (
-                SELECT TRIM(BLOCK_RECL_CD) AS BLOCK_RECL_CD
-                FROM reference.BLOCK_RECL_LKP, ymt
-                WHERE BNKRPY_F = 'Y'
-                  AND ymt.yrmth BETWEEN EFF_FROM_YR_MTH AND EFF_TO_YR_MTH
-            )
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY BLOCK_RECL_CD ORDER BY BLOCK_RECL_CD) = 1
-        ),
-        lk_chrg_stat AS (
-            SELECT CHRG_OFF_CD
-            FROM (
-                SELECT TRIM(CHRG_OFF_CD) AS CHRG_OFF_CD
-                FROM reference.CHRG_OFF_LKP, ymt
-                WHERE CHRG_OFF_STAT_F = 'Y'
-                  AND ymt.yrmth BETWEEN EFF_FROM_YR_MTH AND EFF_TO_YR_MTH
-            )
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY CHRG_OFF_CD ORDER BY CHRG_OFF_CD) = 1
         ),
         lk_bf AS (
             SELECT BNKRPY_F, BLOCK_RECL_CD
@@ -215,144 +198,14 @@ def export_result(
                     ELSE 'N'
                 END AS HELOC_F,
                 CASE
-                    WHEN lk_recl.BLOCK_RECL_CD IS NULL THEN '1'
-                    ELSE '0'
-                END AS v_PT_STAT_BLCK_RECL_CD_LKP_CUR,
-                CASE
                     WHEN a.CR_LMT_AMT > a.TOT_NEW_BAL_AMT THEN a.CR_LMT_AMT
                     ELSE a.TOT_NEW_BAL_AMT
                 END AS REVISED_EXPSR_AMT
             FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT a
             LEFT JOIN reference.TRNST_EXCLSN_LKP c
                 ON a.TRNST_NUM = c.EXCLUDED_TRNST_NUM
-            LEFT JOIN lk_bnkrpy_block lk_recl
-                ON TRIM(a.BLOCK_RECL_CD) = lk_recl.BLOCK_RECL_CD
             WHERE a.MTH_TM_ID =
                 {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
-        ),
-        prev_snap AS (
-            SELECT
-                a.BASEL_ACCT_ID,
-                a.PRIM_BASEL_CUST_ID AS BASEL_CUST_ID,
-                a.TOT_NEW_BAL_AMT AS PREV_TOT_NEW_BAL_AMT,
-                TRIM(a.CHRG_OFF_CD) AS PREV_CHRG_OFF_CD,
-                TRIM(a.BLOCK_RECL_CD) AS PREV_BLOCK_RECL_CD,
-                CASE
-                    WHEN a.TOT_NEW_BAL_AMT > 0 AND lk_recl.BLOCK_RECL_CD IS NULL THEN '1'
-                    ELSE '0'
-                END AS v_PT_STAT_BLCK_RECL_CD_LKP_PRV,
-                CASE
-                    WHEN lk_chrg.CHRG_OFF_CD IS NULL THEN '1'
-                    ELSE '0'
-                END AS v_PT_STAT_CHRG_OFF_LKP_PREV2,
-                a.TOT_UNPAID_FNCL_CHRG_AMT AS PREV_TOT_UNPAID_FNCL_CHRG_AMT
-            FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT a
-            LEFT JOIN lk_bnkrpy_block lk_recl
-                ON TRIM(a.BLOCK_RECL_CD) = lk_recl.BLOCK_RECL_CD
-            LEFT JOIN lk_chrg_stat lk_chrg
-                ON TRIM(a.CHRG_OFF_CD) = lk_chrg.CHRG_OFF_CD
-            WHERE a.MTH_TM_ID =
-                {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 40
-        ),
-        snap_with_pit AS (
-            SELECT
-                s.*,
-                ps.PREV_TOT_NEW_BAL_AMT,
-                ps.PREV_CHRG_OFF_CD,
-                ps.PREV_BLOCK_RECL_CD,
-                ps.PREV_TOT_UNPAID_FNCL_CHRG_AMT,
-                ps.v_PT_STAT_BLCK_RECL_CD_LKP_PRV,
-                ps.v_PT_STAT_CHRG_OFF_LKP_PREV2,
-                CASE
-                    WHEN s.HELOC_F = 'N' THEN
-                        CASE
-                            WHEN s.CHRG_OFF_CD = '1' THEN 'CHG'
-                            WHEN s.BNS_DLQNT_DAY < 120
-                                 AND NOT (s.TOT_NEW_BAL_AMT > 0 AND s.CHRG_OFF_CD IN ('N', 'Q'))
-                                 AND s.v_PT_STAT_BLCK_RECL_CD_LKP_CUR = '1'
-                            THEN 'CUR'
-                            WHEN s.TOT_NEW_BAL_AMT > 0
-                                 AND s.TOT_NEW_BAL_AMT = s.TOT_UNPAID_FNCL_CHRG_AMT
-                                 AND ps.v_PT_STAT_CHRG_OFF_LKP_PREV2 = '1'
-                                 AND NOT (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.PREV_CHRG_OFF_CD IN ('N', 'Q'))
-                                 AND (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.v_PT_STAT_BLCK_RECL_CD_LKP_PRV = '1')
-                            THEN 'CUR'
-                            WHEN s.TOT_NEW_BAL_AMT = 0
-                                 AND ps.PREV_TOT_NEW_BAL_AMT = ps.PREV_TOT_UNPAID_FNCL_CHRG_AMT
-                                 AND ps.v_PT_STAT_CHRG_OFF_LKP_PREV2 = '1'
-                                 AND NOT (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.PREV_CHRG_OFF_CD IN ('N', 'Q'))
-                                 AND (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.v_PT_STAT_BLCK_RECL_CD_LKP_PRV = '1')
-                            THEN 'CUR'
-                            ELSE 'DEF'
-                        END
-                    ELSE
-                        CASE
-                            WHEN s.CHRG_OFF_CD = '1' THEN 'CHG'
-                            WHEN s.BNS_DLQNT_DAY < 120
-                                 AND NOT (s.TOT_NEW_BAL_AMT > 0 AND s.CHRG_OFF_CD IN ('N', 'Q'))
-                            THEN 'CUR'
-                            WHEN s.TOT_NEW_BAL_AMT > 0
-                                 AND s.TOT_NEW_BAL_AMT = s.TOT_UNPAID_FNCL_CHRG_AMT
-                                 AND s.CHRG_OFF_CD <> '1'
-                                 AND NOT (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.PREV_CHRG_OFF_CD IN ('N', 'Q'))
-                                 AND ps.PREV_TOT_NEW_BAL_AMT > 0
-                            THEN 'CUR'
-                            WHEN s.TOT_NEW_BAL_AMT = 0
-                                 AND ps.PREV_TOT_NEW_BAL_AMT = ps.PREV_TOT_UNPAID_FNCL_CHRG_AMT
-                                 AND ps.PREV_CHRG_OFF_CD <> '1'
-                                 AND NOT (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.PREV_CHRG_OFF_CD IN ('N', 'Q'))
-                                 AND ps.PREV_TOT_NEW_BAL_AMT > 0
-                            THEN 'CUR'
-                            ELSE 'DEF'
-                        END
-                END AS OLD_PIT_STAT_VER_2_CD,
-                CASE
-                    WHEN s.HELOC_F = 'N' THEN
-                        CASE
-                            WHEN s.CHRG_OFF_CD = '1' THEN 'CHG'
-                            WHEN s.BNS_DLQNT_DAY < 210
-                                 AND NOT (s.TOT_NEW_BAL_AMT > 0 AND s.CHRG_OFF_CD IN ('N', 'Q'))
-                                 AND s.v_PT_STAT_BLCK_RECL_CD_LKP_CUR = '1'
-                            THEN 'CUR'
-                            WHEN s.TOT_NEW_BAL_AMT > 0
-                                 AND s.TOT_NEW_BAL_AMT = s.TOT_UNPAID_FNCL_CHRG_AMT
-                                 AND ps.v_PT_STAT_CHRG_OFF_LKP_PREV2 = '1'
-                                 AND NOT (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.PREV_CHRG_OFF_CD IN ('N', 'Q'))
-                                 AND (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.v_PT_STAT_BLCK_RECL_CD_LKP_PRV = '1')
-                            THEN 'CUR'
-                            WHEN s.TOT_NEW_BAL_AMT = 0
-                                 AND ps.PREV_TOT_NEW_BAL_AMT = ps.PREV_TOT_UNPAID_FNCL_CHRG_AMT
-                                 AND ps.v_PT_STAT_CHRG_OFF_LKP_PREV2 = '1'
-                                 AND NOT (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.PREV_CHRG_OFF_CD IN ('N', 'Q'))
-                                 AND (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.v_PT_STAT_BLCK_RECL_CD_LKP_PRV = '1')
-                            THEN 'CUR'
-                            ELSE 'DEF'
-                        END
-                    ELSE
-                        CASE
-                            WHEN s.CHRG_OFF_CD = '1' THEN 'CHG'
-                            WHEN s.BNS_DLQNT_DAY < 210
-                                 AND NOT (s.TOT_NEW_BAL_AMT > 0 AND s.CHRG_OFF_CD IN ('N', 'Q'))
-                            THEN 'CUR'
-                            WHEN s.TOT_NEW_BAL_AMT > 0
-                                 AND s.TOT_NEW_BAL_AMT = s.TOT_UNPAID_FNCL_CHRG_AMT
-                                 AND s.CHRG_OFF_CD <> '1'
-                                 AND NOT (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.PREV_CHRG_OFF_CD IN ('N', 'Q'))
-                                 AND ps.PREV_TOT_NEW_BAL_AMT > 0
-                            THEN 'CUR'
-                            WHEN s.TOT_NEW_BAL_AMT = 0
-                                 AND ps.PREV_TOT_NEW_BAL_AMT = ps.PREV_TOT_UNPAID_FNCL_CHRG_AMT
-                                 AND ps.PREV_CHRG_OFF_CD <> '1'
-                                 AND NOT (ps.PREV_TOT_NEW_BAL_AMT > 0 AND ps.PREV_CHRG_OFF_CD IN ('N', 'Q'))
-                                 AND ps.PREV_TOT_NEW_BAL_AMT > 0
-                            THEN 'CUR'
-                            ELSE 'DEF'
-                        END
-                END AS PIT_STAT_VER_2_CD_INTERIM
-            FROM snap s
-            LEFT JOIN prev_snap ps
-                ON s.BASEL_ACCT_ID = ps.BASEL_ACCT_ID
-               AND s.BASEL_CUST_ID = ps.BASEL_CUST_ID
         ),
         snap_cd AS (
             SELECT
@@ -380,12 +233,10 @@ def export_result(
                 a.HELOC_F,
                 a.BILL_CD_CHAR_1,
                 a.BILL_CD_CHAR_2,
-                a.PREV_TOT_NEW_BAL_AMT,
-                a.PREV_BLOCK_RECL_CD,
-                a.PREV_TOT_UNPAID_FNCL_CHRG_AMT,
-                a.PIT_STAT_VER_2_CD_INTERIM,
-                a.OLD_PIT_STAT_VER_2_CD,
                 a.REVISED_EXPSR_AMT,
+                pit90.PIT_STAT_VER_2_CD90,
+                pit180.PIT_STAT_VER_2_CD180,
+                pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS PIT_STAT_VER_2_CD,
                 bf.BNKRPY_F,
                 sp.CONSM_SCORECRD_EXCLSN_F AS CONSM_SCORECRD_EXCLSN_F3,
                 cc1.CSEF_CONDITION_1,
@@ -397,7 +248,7 @@ def export_result(
                 END AS BASEL_PRD_DESC,
                 sp.LTV_TP_CD,
                 sp.SML_BUS_F,
-                sp.CONSM_PRD_TREATMNT_CD,
+                sp.CONSM_PRD_TREATMNT_CD AS CONSM_PRD_TREATMNT_CD_LKP,
                 CASE
                     WHEN sp.SRC_PRD_CD = 'SSL' THEN std.BASEL_PRD_CD
                     ELSE sp.BASEL_PRD_CD
@@ -405,7 +256,17 @@ def export_result(
                 sp.SRC_SUB_PRD_CD,
                 a.BILL_CD_CHAR1,
                 std.BILL_CD_CHAR
-            FROM snap_with_pit a
+            FROM snap a
+            LEFT JOIN features.PIT_STAT_VER_2_CD90 pit90
+                ON a.BASEL_ACCT_ID = pit90.BASEL_ACCT_ID
+               AND pit90.OBSN_DT = '{_RUNDATE}'
+            LEFT JOIN features.PIT_STAT_VER_2_CD180 pit180
+                ON a.BASEL_ACCT_ID = pit180.BASEL_ACCT_ID
+               AND pit180.OBSN_DT = '{_RUNDATE}'
+            LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+                ON a.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+               AND pit.OBSN_DT = '{_RUNDATE}'
+               AND pit.SRC_SYS_CD = 'KS'
             LEFT JOIN lk_bf bf
                 ON a.BLOCK_RECL_CD = bf.BLOCK_RECL_CD
             LEFT JOIN lk_asf asf
@@ -426,13 +287,6 @@ def export_result(
         derived AS (
             SELECT
                 *,
-                OLD_PIT_STAT_VER_2_CD AS PIT_STAT_VER_2_CD90,
-                PIT_STAT_VER_2_CD_INTERIM AS PIT_STAT_VER_2_CD180,
-                CASE
-                    WHEN BASEL_PRD_CD = 'CC' AND HELOC_F = 'N'
-                    THEN PIT_STAT_VER_2_CD_INTERIM
-                    ELSE OLD_PIT_STAT_VER_2_CD
-                END AS PIT_STAT_VER_2_CD,
                 CASE
                     WHEN COALESCE(EXCLUDED_TRNST_NUM, '') = '' THEN 'N'
                     ELSE 'Y'
@@ -460,8 +314,8 @@ def export_result(
                     WHEN (
                         CASE
                             WHEN BASEL_PRD_CD = 'CC' AND HELOC_F = 'N'
-                            THEN PIT_STAT_VER_2_CD_INTERIM
-                            ELSE OLD_PIT_STAT_VER_2_CD
+                            THEN PIT_STAT_VER_2_CD180
+                            ELSE PIT_STAT_VER_2_CD90
                         END
                     ) = 'CHG'
                     THEN 'Y'
@@ -472,25 +326,15 @@ def export_result(
                     WHEN TOT_NEW_BAL_AMT <= 0
                          AND (SUBSTR(BLOCK_RECL_CD, 1, 1) = 'V' OR BLOCK_RECL_CD = 'FX')
                     THEN 'Z'
-                    ELSE CONSM_PRD_TREATMNT_CD
+                    ELSE CONSM_PRD_TREATMNT_CD_LKP
                 END AS CONSM_PRD_TREATMNT_CD_FINAL
             FROM snap_cd
         ),
-        with_pit_override AS (
+        derived_out AS (
             SELECT
-                d.* EXCLUDE (PIT_STAT_VER_2_CD, CONSM_PRD_TREATMNT_CD),
-                d.CONSM_PRD_TREATMNT_CD_FINAL AS CONSM_PRD_TREATMNT_CD,
-                CASE
-                    WHEN pit.CROSS_DFLT_PIT_OVERRIDE_F = 'Y'
-                    THEN pit.CROSS_DFLT_PIT_STATUS
-                    ELSE d.PIT_STAT_VER_2_CD
-                END AS PIT_STAT_VER_2_CD
-            FROM derived d
-            LEFT JOIN ingestion.PIT_STATUS_PRE_STEP pit
-                ON d.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
-               AND pit.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
-               AND pit.SRC_SYS_CD = 'KS'
-               AND pit.CROSS_DFLT_PIT_OVERRIDE_F = 'Y'
+                * EXCLUDE (CONSM_PRD_TREATMNT_CD_LKP, CONSM_PRD_TREATMNT_CD_FINAL),
+                CONSM_PRD_TREATMNT_CD_FINAL AS CONSM_PRD_TREATMNT_CD
+            FROM derived
         ),
         thrshld AS (
             SELECT a.THRSHLD
@@ -506,7 +350,7 @@ def export_result(
                 BASEL_CUST_ID,
                 BASEL_PRD_CD,
                 SUM(REVISED_EXPSR_AMT) AS TOT_EXPSR
-            FROM with_pit_override
+            FROM derived_out
             WHERE BASEL_CUST_ID > 0
               AND CONSM_PRD_TREATMNT_CD = 'A'
               AND HELOC_F = 'N'
@@ -542,7 +386,7 @@ def export_result(
                     THEN 'N'
                     ELSE NULL
                 END AS TOTAL_EXPSR_ABOVE_LMT_F_BASE
-            FROM with_pit_override a
+            FROM derived_out a
             LEFT JOIN tot_expsr te
                 ON a.BASEL_CUST_ID = te.BASEL_CUST_ID
                AND a.BASEL_PRD_CD = te.BASEL_PRD_CD

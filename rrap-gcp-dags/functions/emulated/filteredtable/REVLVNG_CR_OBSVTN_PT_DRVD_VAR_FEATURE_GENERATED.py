@@ -2,7 +2,7 @@
 Rewrite of J_RRII_KS10_2510 via pre-materialized features (skips 2103).
 
 Builds emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR from:
-  snapshot balances + features.* + PIT_STATUS_PRE_STEP override
+  snapshot balances + features.* (PIT_STATUS_CD = PIT_STATUS_CROSS_DEFAULT_ORIG)
   export_dataprep -> export_pdead / export_lgd -> duckdb_load
 
 Requires features DAG backfill for every OBSN_DT in the PD/LGD history windows
@@ -12,10 +12,9 @@ Requires features DAG backfill for every OBSN_DT in the PD/LGD history windows
 UPSTREAM_ASSET = [
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
     "ingestion.TM_DIM",
-    "ingestion.PIT_STATUS_PRE_STEP",
     "features.BASEL_PRD_CD",
-    "features.PIT_STAT_VER_2_CD90",
-    "features.PIT_STAT_VER_2_CD180",
+    "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
+    "features.HELOC_F",
     "features.ACCRL_STAT_F",
     "features.CONSM_PRD_TREATMNT_CD",
     "features.SML_BUS_F",
@@ -118,18 +117,6 @@ def export_dataprep(
     WITH
         mth_tm_id AS (
             SELECT {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS val
-        ),
-        pit_override AS (
-            SELECT
-                BASEL_ACCT_ID,
-                MTH_TM_ID,
-                CROSS_DFLT_PIT_STATUS
-            FROM ingestion.PIT_STATUS_PRE_STEP
-            WHERE SRC_SYS_CD = 'KS'
-              AND CROSS_DFLT_PIT_OVERRIDE_F = 'Y'
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY BASEL_ACCT_ID, MTH_TM_ID ORDER BY STEP_PLN_SNAPSHOT_ID
-            ) = 1
         )
     SELECT
         snp.BASEL_ACCT_ID,
@@ -138,29 +125,13 @@ def export_dataprep(
         snp.TOT_NEW_BAL_AMT AS OS_BAL_AMT,
         snp.TOT_UNPAID_FNCL_CHRG_AMT,
         accrl.ACCRL_STAT_F,
-        COALESCE(
-            pit.CROSS_DFLT_PIT_STATUS,
-            CASE
-                WHEN prd.BASEL_PRD_CD = 'CC'
-                 AND NOT (
-                     snp.SUB_PRD_CD = 'RS'
-                     OR snp.STEP_PLN_SNAPSHOT_ID NOT IN (-1, -2)
-                 )
-                THEN pit180.PIT_STAT_VER_2_CD180
-                ELSE pit90.PIT_STAT_VER_2_CD90
-            END
-        ) AS PIT_STATUS_CD,
+        pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS PIT_STATUS_CD,
         prd.BASEL_PRD_CD,
         CAST(NULL AS DOUBLE) AS TOT_CRNT_BAL_AMT,
         trt.CONSM_PRD_TREATMNT_CD,
         sml.SML_BUS_F,
         trnst.TRNST_EXCLSN_F,
-        CASE
-            WHEN snp.SUB_PRD_CD = 'RS'
-              OR snp.STEP_PLN_SNAPSHOT_ID NOT IN (-1, -2)
-            THEN 'Y'
-            ELSE 'N'
-        END AS HELOC_F
+        heloc.HELOC_F
     FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT snp
     INNER JOIN ingestion.TM_DIM tm
         ON snp.MTH_TM_ID = tm.TM_ID
@@ -169,12 +140,13 @@ def export_dataprep(
     LEFT JOIN features.BASEL_PRD_CD prd
         ON snp.BASEL_ACCT_ID = prd.BASEL_ACCT_ID
        AND prd.OBSN_DT = tm.TM_LVL_END_DT
-    LEFT JOIN features.PIT_STAT_VER_2_CD90 pit90
-        ON snp.BASEL_ACCT_ID = pit90.BASEL_ACCT_ID
-       AND pit90.OBSN_DT = tm.TM_LVL_END_DT
-    LEFT JOIN features.PIT_STAT_VER_2_CD180 pit180
-        ON snp.BASEL_ACCT_ID = pit180.BASEL_ACCT_ID
-       AND pit180.OBSN_DT = tm.TM_LVL_END_DT
+    LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+        ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+       AND pit.OBSN_DT = tm.TM_LVL_END_DT
+       AND pit.SRC_SYS_CD = 'KS'
+    LEFT JOIN features.HELOC_F heloc
+        ON snp.BASEL_ACCT_ID = heloc.BASEL_ACCT_ID
+       AND heloc.OBSN_DT = tm.TM_LVL_END_DT
     LEFT JOIN features.ACCRL_STAT_F accrl
         ON snp.BASEL_ACCT_ID = accrl.BASEL_ACCT_ID
        AND accrl.OBSN_DT = tm.TM_LVL_END_DT
@@ -187,9 +159,6 @@ def export_dataprep(
     LEFT JOIN features.TRNST_EXCLSN_F trnst
         ON snp.BASEL_ACCT_ID = trnst.BASEL_ACCT_ID
        AND trnst.OBSN_DT = tm.TM_LVL_END_DT
-    LEFT JOIN pit_override pit
-        ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
-       AND snp.MTH_TM_ID = pit.MTH_TM_ID
     WHERE (
         snp.MTH_TM_ID >= mth_tm_id.val - 12 * 40
         AND snp.MTH_TM_ID <= mth_tm_id.val
