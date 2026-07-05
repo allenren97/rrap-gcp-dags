@@ -3,13 +3,15 @@ Rewrite of J_RRAP_TL10_2104_BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2.sas only.
 
 Builds emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 in a single DuckDB pipeline
 (SPL PIT v2, exclusions, treatment, OS_BAL_AMT_V2) for the current process month.
+
+PIT_STATUS_V2 = features.PIT_STATUS_CROSS_DEFAULT_ORIG (SRC_SYS_CD = 'SPL').
 """
 
 UPSTREAM_ASSET = [
     "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
     "emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS",
     "ingestion.BASEL_PSNL_LN_SUBV_MST_SNAPSHT_NEW",
-    "ingestion.PIT_STATUS_PRE_STEP",
+    "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
     "ingestion.TM_DIM",
     "reference.PSNL_LOAN_SCRTY_CD_PRPS_CD_LKP",
     "reference.PSNL_LOAN_SCRTY_CD_LKP",
@@ -70,7 +72,7 @@ def duckdb_load(
                 m.STEP_PLN_SNAPSHOT_ID,
                 TRY_CAST(TRIM(m.PRPS_CD) AS INTEGER) AS NUM_PURPOSE_CODE,
                 TRY_CAST(TRIM(m.SCRTY_CD) AS INTEGER) AS NUM_SCRTY_CD,
-                pit.CROSS_DFLT_PIT_STATUS AS PIT_STATUS,
+                pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS PIT_STATUS,
                 CASE
                     WHEN s.BASEL_ACCT_ID IS NOT NULL THEN 'S10'
                     WHEN lkp1.PRD_ID IS NOT NULL THEN lkp1.PRD_ID
@@ -97,9 +99,9 @@ def duckdb_load(
             LEFT JOIN emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS d
                 ON m.BASEL_ACCT_ID = d.BASEL_ACCT_ID
                AND m.MTH_TM_ID = d.MTH_TM_ID
-            LEFT JOIN ingestion.PIT_STATUS_PRE_STEP pit
-                ON m.MTH_TM_ID = pit.MTH_TM_ID
-               AND m.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+            LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+                ON m.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+               AND pit.OBSN_DT = tm.TM_LVL_END_DT
                AND pit.SRC_SYS_CD = 'SPL'
             LEFT JOIN subv_accts s ON m.BASEL_ACCT_ID = s.BASEL_ACCT_ID
             LEFT JOIN reference.PSNL_LOAN_SCRTY_CD_PRPS_CD_LKP lkp1
@@ -216,12 +218,15 @@ def duckdb_load(
         ),
         hist_pit AS (
             SELECT
-                BASEL_ACCT_ID,
-                MTH_TM_ID,
-                CROSS_DFLT_PIT_STATUS AS PIT_STATUS
-            FROM ingestion.PIT_STATUS_PRE_STEP
-            WHERE SRC_SYS_CD = 'SPL'
-              AND MTH_TM_ID <= (SELECT val FROM mth_tm_id)
+                pit.BASEL_ACCT_ID,
+                tm.TM_ID AS MTH_TM_ID,
+                pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS PIT_STATUS
+            FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+            INNER JOIN ingestion.TM_DIM tm
+                ON pit.OBSN_DT = tm.TM_LVL_END_DT
+               AND TRIM(tm.TM_LVL) = 'Month'
+            WHERE pit.SRC_SYS_CD = 'SPL'
+              AND tm.TM_ID <= (SELECT val FROM mth_tm_id)
         ),
         hist_joined AS (
             SELECT
