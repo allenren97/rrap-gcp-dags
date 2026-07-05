@@ -5,15 +5,17 @@ Builds emulated.STATUS_FINAL for the process month:
   export_result — define status + exclusions from ingestion.MORTGAGE_HIST
   duckdb_load   — insert parquet into DuckLake
 
-Logic mirrors 01_define_status.sas (delq_days_2/months_2, CUR/DEF status,
-model_excl, PIT_STATUS_PRE_STEP Step cross-default override RRMSS-2842).
-Processes mortgage_hist rows whose PROCESS_DATE equals the current rundate
-(month-end), with process dates on/after 2010-01-31 (SAS gather-load filter).
+Logic mirrors 01_define_status.sas. Reuses existing features where available:
+  STATUS            — features.PIT_STATUS_CROSS_DEFAULT_ORIG (MOR) via features.MORT_NUM
+  DELQ_DAYS_2/MONTHS_2 — computed from ingestion.MORTGAGE_HIST (no feature; hist UNPD dates)
+  MODEL_EXCL        — derived inline from STATUS + hist paid-off/balance (no MOR feature)
+  Pass-through cols — ingestion.MORTGAGE_HIST (required by downstream PD/LGD jobs)
 """
 
 UPSTREAM_ASSET = [
     "ingestion.MORTGAGE_HIST",
-    "ingestion.PIT_STATUS_PRE_STEP",
+    "features.MORT_NUM",
+    "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
 ]
 
 DOWNSTREAM_ASSET = "emulated.STATUS_FINAL"
@@ -111,49 +113,16 @@ def export_result(
                     WHEN m.delq_days_2 >= 90 AND m.temp_delq_months_2 = 3 THEN 4
                     ELSE m.temp_delq_months_2
                 END AS delq_months_2,
-                CASE
-                    WHEN pit.MORT_NUM IS NOT NULL THEN pit.CROSS_DFLT_PIT_STATUS
-                    WHEN UPPER(TRIM(COALESCE(m.COMM_TYPE, ''))) = 'RESIDENTIAL'
-                         AND m.PAID_OFF_DATE IS NULL
-                         AND (
-                             (
-                                 COALESCE(m.DELQ_DAYS, 0) < 90
-                                 AND COALESCE(m.DELQ_MONTHS, 0) < 4
-                                 AND UPPER(TRIM(COALESCE(m.FORECLOSE_IND, ''))) <> 'Y'
-                                 AND COALESCE(m.CURRENT_BAL, 0) <> 0
-                                 AND UPPER(TRIM(COALESCE(m.LRA_STATUS, ''))) <> 'Y'
-                             )
-                             OR COALESCE(m.CURRENT_BAL, 0) < 0
-                         )
-                    THEN 'CUR'
-                    WHEN (
-                        UPPER(TRIM(COALESCE(m.COMM_TYPE, ''))) = 'RESIDENTIAL'
-                        AND m.PAID_OFF_DATE IS NULL
-                        AND (
-                            COALESCE(m.DELQ_DAYS, 0) >= 90
-                            OR COALESCE(m.DELQ_MONTHS, 0) >= 4
-                            OR UPPER(TRIM(COALESCE(m.FORECLOSE_IND, ''))) = 'Y'
-                            OR UPPER(TRIM(COALESCE(m.LRA_STATUS, ''))) = 'Y'
-                        )
-                        AND COALESCE(m.CURRENT_BAL, 0) > 0
-                    )
-                    OR (
-                        UPPER(TRIM(COALESCE(m.COMM_TYPE, ''))) = 'RESIDENTIAL'
-                        AND UPPER(TRIM(COALESCE(m.FORECLOSE_IND, ''))) = 'Y'
-                        AND UPPER(TRIM(COALESCE(m.PAID_OFF_IND, ''))) = 'Y'
-                        AND GREATEST(
-                            COALESCE(m.CURRENT_BAL, 0),
-                            COALESCE(-m.TOTAL_SUSPENSE, 0)
-                        ) > 0
-                    )
-                    THEN 'DEF'
-                END AS new_status
+                pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS new_status
             FROM with_delq_mth m
-            LEFT JOIN ingestion.PIT_STATUS_PRE_STEP pit
+            LEFT JOIN features.MORT_NUM mn
+                ON mn.SRC_SYS_CD = 'MOR'
+               AND mn.OBSN_DT = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+               AND m.MORTGAGE_NO = mn.MORT_NUM
+            LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
                 ON pit.SRC_SYS_CD = 'MOR'
-               AND pit.CROSS_DFLT_PIT_OVERRIDE_F = 'Y'
-               AND m.MORTGAGE_NO = pit.MORT_NUM
-               AND m.PROCESS_DATE = pit.MORT_PROCESS_DATE
+               AND pit.OBSN_DT = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+               AND pit.BASEL_ACCT_ID = mn.BASEL_ACCT_ID
         )
     SELECT
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
