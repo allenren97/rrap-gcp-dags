@@ -25,7 +25,7 @@ DEPENDENCIES = {
 }
 
 _SPL_ACCT_FEATS = """
-    spl_acct_feats AS (
+    spl_acct_feats AS MATERIALIZED (
         SELECT
             snp.MTH_TM_ID,
             snp.BASEL_ACCT_ID,
@@ -41,17 +41,38 @@ _SPL_ACCT_FEATS = """
            AND TRIM(tm.TM_LVL) = 'Month'
         CROSS JOIN lgdd_obs_tm lgdd
         CROSS JOIN lgdnd_obs_tm lgdnd
-        LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+        LEFT JOIN (
+            SELECT BASEL_ACCT_ID, OBSN_DT, PIT_STATUS_CROSS_DEFAULT_ORIG
+            FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG
+            WHERE SRC_SYS_CD = 'SPL'
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY BASEL_ACCT_ID, OBSN_DT
+                ORDER BY PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
+            ) = 1
+        ) pit
             ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
            AND pit.OBSN_DT = tm.TM_LVL_END_DT
-           AND pit.SRC_SYS_CD = 'SPL'
-        LEFT JOIN features.TREATMENT_F trt
+        LEFT JOIN (
+            SELECT BASEL_ACCT_ID, OBSN_DT, TREATMENT_F
+            FROM features.TREATMENT_F
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY BASEL_ACCT_ID, OBSN_DT
+                ORDER BY TREATMENT_F DESC NULLS LAST
+            ) = 1
+        ) trt
             ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
            AND trt.OBSN_DT = tm.TM_LVL_END_DT
-        LEFT JOIN features.SUB_PORT_F sub
+        LEFT JOIN (
+            SELECT BASEL_ACCT_ID, OBSN_DT, SUB_PORT_F
+            FROM features.SUB_PORT_F
+            WHERE SRC_SYS_CD = 'SPL'
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY BASEL_ACCT_ID, OBSN_DT
+                ORDER BY SUB_PORT_F DESC NULLS LAST
+            ) = 1
+        ) sub
             ON snp.BASEL_ACCT_ID = sub.BASEL_ACCT_ID
            AND sub.OBSN_DT = tm.TM_LVL_END_DT
-           AND sub.SRC_SYS_CD = 'SPL'
         WHERE snp.RECD_STAT_CD IN ('4', '5', '6', '7', '8')
           AND snp.MTH_TM_ID BETWEEN lgdd.OBS_START_TM_ID AND lgdnd.OBS_END_TM_ID
     ),
