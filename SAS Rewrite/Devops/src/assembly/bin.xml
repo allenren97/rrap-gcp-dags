@@ -1,0 +1,28 @@
+<assembly xmlns="http://maven.apache.org/plugins/maven-assembly-plugin/assembly/1.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/plugins/maven-assembly-plugin/assembly/1.1.0 http://maven.apache.org/xsd/assembly-1.1.0.xsd">
+  <id>bin</id>
+  <baseDirectory>/</baseDirectory>
+  <formats>
+    <!-- was zip before -->
+    <format>zip</format>
+  </formats>
+   <files>
+    <file>
+      <source>deploy.sh</source>
+      <!--add to script folder to avoid override when unzip again in deploy.sh -->
+      <outputDirectory>/</outputDirectory>
+      <filtered>true</filtered>
+    </file>
+  </files>
+  <fileSets>
+    <fileSet>
+      <directory>Devops/scripts</directory>
+    </fileSet>
+	<fileSet>
+      <directory>ETL/Python</directory>
+    </fileSet>
+	<fileSet>
+      <directory>ETL/DDL</directory>
+    </fileSet>
+  </fileSets>
+</assembly>

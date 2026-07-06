@@ -1,0 +1,5 @@
+record
+  {final_delim=end, record_delim_string='\n', delim=',', quote=none}
+(
+  excluded_trnst_num:string[max=5];
+)

@@ -1,0 +1,1 @@
+script that used to create tables

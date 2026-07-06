@@ -1,0 +1,19 @@
+Use CRZ_CUST_SCORECARD;
+DROP TABLE IF EXISTS RISK_CBS_AUDIT_JOB_LOG;
+CREATE TABLE RISK_CBS_AUDIT_JOB_LOG(
+    EFF_DT                    DATE,
+    DATE_TYPE                 VARCHAR(20),
+    INSRT_PROCESS_TIMESTMP    TIMESTAMP,
+    OP_FIELD                  VARCHAR(1000),
+    SRC_SCHEMA_NM             VARCHAR(100),
+    SRC_TBL_NM                VARCHAR(100),
+    SRC_TBL_ROW_CNT           BIGINT,
+    TARGET_SCHEMA_NM          VARCHAR(100),
+    TARGET_TBL_NM             VARCHAR(100),
+    TARGET_TBL_ROW_CNT        BIGINT,
+    HAS_DATA_F                VARCHAR(1)
+)
+STORED AS ORC
+LOCATION '/data/crz/bbcx/crz_cust_scorecard.db/RISK_CBS_AUDIT_JOB_LOG'
+TBLPROPERTIES ('orc.compress' = 'SNAPPY')
+;

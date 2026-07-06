@@ -1,0 +1,9 @@
+# Properties for CiaD Jenkins deploy pipelines
+
+deployScriptFile: sudo_deploy.sh
+#deployScriptFile: deploy.sh
+
+#do not add version here, like "cbs-1.0.zip"
+scriptCommand: ${serverName} ${deployArtifact}
+#scriptCommand: ${serverName} "cbs.zip" "/app/dev_bbcx_cbs_appid/deploy"
+

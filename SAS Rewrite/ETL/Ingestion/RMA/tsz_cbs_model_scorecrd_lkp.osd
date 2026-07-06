@@ -1,0 +1,9 @@
+record
+  {final_delim=end, record_delim_string='\r\n', delim=',', quote=none}
+(
+  seg_num:int16;
+  scorecrd_var:string[max=100];
+  bin_cond:nullable string[max=100] {null_field=''};
+  score:int16;
+  seq_num:int16;  
+)

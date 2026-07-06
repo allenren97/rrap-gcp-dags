@@ -1,0 +1,17 @@
+Use crz_cust_scorecard;
+DROP TABLE IF EXISTS RISK_BLOCK_RECL_LKP;
+CREATE EXTERNAL TABLE RISK_BLOCK_RECL_LKP(
+    BLOCK_RECL_CD                 VARCHAR(10),
+    INSRT_PROCESS_TMSTMP          TIMESTAMP,
+    OP_FIELD                      VARCHAR(1000),
+    BLOCK_RECL_DESC               VARCHAR(250),
+    CONSM_SCORECRD_EXCLSN_FLAG    VARCHAR(1),
+    BNKRPCY_FLAG                  VARCHAR(1),
+    BNKRPCY_FLAG_DESC             VARCHAR(250)
+)
+PARTITIONED BY( EFF_DT DATE)
+STORED AS ORC
+LOCATION '/data/crz/bbcx/crz_cust_scorecard.db/RISK_BLOCK_RECL_LKP'
+TBLPROPERTIES ('orc.compress' = 'SNAPPY')
+;
+

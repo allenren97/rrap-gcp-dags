@@ -1,18 +1,28 @@
 """
-Rewrite of J_RRII_KS10_2510_REVLVNG_CR_OBSVTN_PT_DRVD_VAR.sas only.
+Rewrite of J_RRII_KS10_2510_REVLVNG_CR_OBSVTN_PT_DRVD_VAR.sas.
 
-SAS work tables map to export tasks (parquet):
-  obs_pt_dataprep  -> export_dataprep
-  obs_pt_pd_ead    -> export_pdead   (%rrap_defaulter_model, 12-month window)
-  obs_pt_lgd       -> export_lgd      (%rrap_defaulter_model, 24-month lookback)
+Dataprep: ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT + features.* (PIT, product,
+treatment, HELOC, etc.) keyed by TM_DIM month-end. Does not use 2103
+(BASEL_REVLVNG_CR_BASE_DRVD_VARS).
 
-duckdb_load joins BASEL + defaulter parquet outputs into the target table.
+Upstream: features.* stacked through PD/LGD history windows (~38 month-ends).
+
+Task flow:
+  export_dataprep_pdead (12 mo) -> export_pdead  (%rrap_defaulter_model)
+  export_dataprep_lgd (24–48 mo ago) -> export_lgd
+  -> duckdb_load
 """
 
 UPSTREAM_ASSET = [
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
     "ingestion.TM_DIM",
-    "emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS",
+    "features.BASEL_PRD_CD",
+    "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
+    "features.HELOC_F",
+    "features.ACCRL_STAT_F",
+    "features.CONSM_PRD_TREATMNT_CD",
+    "features.SML_BUS_F",
+    "features.TRNST_EXCLSN_F",
 ]
 
 DOWNSTREAM_ASSET = "emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR"
@@ -20,8 +30,9 @@ DOWNSTREAM_ASSET = "emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR"
 _TASK_GROUP = "filteredtable__REVLVNG_CR_OBSVTN_PT_DRVD_VAR"
 
 DEPENDENCIES = {
-    "duckdb_delete": ["export_dataprep"],
-    "export_dataprep": ["export_pdead", "export_lgd"],
+    "duckdb_delete": ["export_dataprep_pdead", "export_dataprep_lgd"],
+    "export_dataprep_pdead": ["export_pdead"],
+    "export_dataprep_lgd": ["export_lgd"],
     "export_pdead": ["duckdb_load"],
     "export_lgd": ["duckdb_load"],
 }
@@ -93,6 +104,50 @@ _NEW_DEFAULT_FLG = """
     END
 """
 
+_DATAPREP_SQL = """
+    SELECT
+        snp.BASEL_ACCT_ID,
+        'KS' AS SRC_SYS_CD,
+        snp.MTH_TM_ID,
+        snp.TOT_NEW_BAL_AMT AS OS_BAL_AMT,
+        snp.TOT_UNPAID_FNCL_CHRG_AMT,
+        accrl.ACCRL_STAT_F,
+        pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS PIT_STATUS_CD,
+        prd.BASEL_PRD_CD,
+        CAST(NULL AS DOUBLE) AS TOT_CRNT_BAL_AMT,
+        trt.CONSM_PRD_TREATMNT_CD,
+        sml.SML_BUS_F,
+        trnst.TRNST_EXCLSN_F,
+        heloc.HELOC_F
+    FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT snp
+    INNER JOIN ingestion.TM_DIM tm
+        ON snp.MTH_TM_ID = tm.TM_ID
+       AND TRIM(tm.TM_LVL) = 'Month'
+    CROSS JOIN mth_tm_id
+    LEFT JOIN features.BASEL_PRD_CD prd
+        ON snp.BASEL_ACCT_ID = prd.BASEL_ACCT_ID
+       AND prd.OBSN_DT = tm.TM_LVL_END_DT
+    LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+        ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+       AND pit.OBSN_DT = tm.TM_LVL_END_DT
+       AND pit.SRC_SYS_CD = 'KS'
+    LEFT JOIN features.HELOC_F heloc
+        ON snp.BASEL_ACCT_ID = heloc.BASEL_ACCT_ID
+       AND heloc.OBSN_DT = tm.TM_LVL_END_DT
+    LEFT JOIN features.ACCRL_STAT_F accrl
+        ON snp.BASEL_ACCT_ID = accrl.BASEL_ACCT_ID
+       AND accrl.OBSN_DT = tm.TM_LVL_END_DT
+    LEFT JOIN features.CONSM_PRD_TREATMNT_CD trt
+        ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
+       AND trt.OBSN_DT = tm.TM_LVL_END_DT
+    LEFT JOIN features.SML_BUS_F sml
+        ON snp.BASEL_ACCT_ID = sml.BASEL_ACCT_ID
+       AND sml.OBSN_DT = tm.TM_LVL_END_DT
+    LEFT JOIN features.TRNST_EXCLSN_F trnst
+        ON snp.BASEL_ACCT_ID = trnst.BASEL_ACCT_ID
+       AND trnst.OBSN_DT = tm.TM_LVL_END_DT
+"""
+
 
 def duckdb_delete(
     duckdb_conn_id="duckdb-conn",
@@ -105,40 +160,35 @@ def duckdb_delete(
     pass
 
 
-def export_dataprep(
+def export_dataprep_pdead(
     duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
     sql=f"""
     WITH
         mth_tm_id AS (
             SELECT {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS val
         )
-    SELECT
-        drv.BASEL_ACCT_ID,
-        'KS' AS SRC_SYS_CD,
-        drv.MTH_TM_ID,
-        snp.TOT_NEW_BAL_AMT AS OS_BAL_AMT,
-        snp.TOT_UNPAID_FNCL_CHRG_AMT,
-        drv.ACCRL_STAT_F,
-        drv.PIT_STAT_VER_2_CD AS PIT_STATUS_CD,
-        drv.BASEL_PRD_CD,
-        CAST(NULL AS DOUBLE) AS TOT_CRNT_BAL_AMT,
-        drv.CONSM_PRD_TREATMNT_CD,
-        drv.SML_BUS_F,
-        drv.TRNST_EXCLSN_F,
-        drv.HELOC_F
-    FROM emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS drv
-    INNER JOIN ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT snp
-        ON drv.BASEL_ACCT_ID = snp.BASEL_ACCT_ID
-       AND drv.MTH_TM_ID = snp.MTH_TM_ID
-    CROSS JOIN mth_tm_id
-    WHERE (
-        drv.MTH_TM_ID >= mth_tm_id.val - 12 * 40
-        AND drv.MTH_TM_ID <= mth_tm_id.val
-    ) OR (
-        drv.MTH_TM_ID >= mth_tm_id.val - 48 * 40
-        AND drv.MTH_TM_ID <= mth_tm_id.val - 24 * 40
-    )
-    ORDER BY drv.BASEL_ACCT_ID, drv.MTH_TM_ID
+    {_DATAPREP_SQL}
+    WHERE snp.MTH_TM_ID >= mth_tm_id.val - 12 * 40
+      AND snp.MTH_TM_ID <= mth_tm_id.val
+    """,
+):
+    pass
+
+
+def export_dataprep_lgd(
+    duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
+    sql=f"""
+    WITH
+        mth_tm_id AS (
+            SELECT {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS val
+        )
+    {_DATAPREP_SQL}
+    WHERE snp.MTH_TM_ID >= mth_tm_id.val - 48 * 40
+      AND snp.MTH_TM_ID <= mth_tm_id.val - 24 * 40
     """,
 ):
     pass
@@ -146,6 +196,8 @@ def export_dataprep(
 
 def export_pdead(
     duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
     sql=f"""
     WITH
         mth_tm_id AS (
@@ -154,7 +206,7 @@ def export_pdead(
         dataprep AS (
             SELECT *
             FROM read_parquet(
-                '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_dataprep", key="parquet") }}}}'
+                '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_dataprep_pdead", key="parquet") }}}}'
             )
         ),
         lagged AS (
@@ -214,6 +266,8 @@ def export_pdead(
 
 def export_lgd(
     duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
     sql=f"""
     WITH
         mth_tm_id AS (
@@ -222,7 +276,7 @@ def export_lgd(
         dataprep AS (
             SELECT *
             FROM read_parquet(
-                '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_dataprep", key="parquet") }}}}'
+                '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_dataprep_lgd", key="parquet") }}}}'
             )
         ),
         lagged AS (
@@ -282,6 +336,8 @@ def export_lgd(
 
 def duckdb_load(
     duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
     sql=f"""
     INSERT INTO {DOWNSTREAM_ASSET} BY NAME
     WITH
@@ -304,7 +360,7 @@ def duckdb_load(
             SELECT
                 '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
                 '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
-                a.MTH_TM_ID AS OBSVTN_MTH_TM_ID,
+                snp.MTH_TM_ID AS OBSVTN_MTH_TM_ID,
                 b.BASEL_ACCT_ID,
                 b.LAST_NEW_DEFAULT_OS_BAL_AMT AS LAST_NEW_DFT_BAL_AMT,
                 b.LAST_NEW_DEFAULT_DATE AS LAST_NEW_DFT_TM_ID,
@@ -315,23 +371,36 @@ def duckdb_load(
                 CURRENT_TIMESTAMP AS INSRT_PROCESS_TMSTMP,
                 CURRENT_TIMESTAMP AS UPDT_PROCESS_TMSTMP,
                 mth_tm_id.val AS PROCESS_MTH_TM_ID
-            FROM emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS a
+            FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT snp
             CROSS JOIN mth_tm_id
+            INNER JOIN ingestion.TM_DIM obs_tm
+                ON snp.MTH_TM_ID = obs_tm.TM_ID
+               AND TRIM(obs_tm.TM_LVL) = 'Month'
             INNER JOIN pdead b
-                ON a.BASEL_ACCT_ID = b.BASEL_ACCT_ID
+                ON snp.BASEL_ACCT_ID = b.BASEL_ACCT_ID
             INNER JOIN ingestion.TM_DIM t
                 ON b.LAST_NEW_DEFAULT_DATE = t.TM_ID
                AND TRIM(t.TM_LVL) = 'Month'
-            WHERE a.PIT_STAT_VER_2_CD = 'CUR'
-              AND a.SML_BUS_F = 'N'
-              AND a.CONSM_PRD_TREATMNT_CD = 'A'
-              AND a.MTH_TM_ID = mth_tm_id.val - 12 * 40
+            INNER JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+                ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+               AND pit.OBSN_DT = obs_tm.TM_LVL_END_DT
+               AND pit.SRC_SYS_CD = 'KS'
+            INNER JOIN features.SML_BUS_F sml
+                ON snp.BASEL_ACCT_ID = sml.BASEL_ACCT_ID
+               AND sml.OBSN_DT = obs_tm.TM_LVL_END_DT
+            INNER JOIN features.CONSM_PRD_TREATMNT_CD trt
+                ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
+               AND trt.OBSN_DT = obs_tm.TM_LVL_END_DT
+            WHERE snp.MTH_TM_ID = mth_tm_id.val - 12 * 40
+              AND pit.PIT_STATUS_CROSS_DEFAULT_ORIG = 'CUR'
+              AND sml.SML_BUS_F = 'N'
+              AND trt.CONSM_PRD_TREATMNT_CD = 'A'
         ),
         lgd_rows AS (
             SELECT
                 '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
                 '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
-                a.MTH_TM_ID AS OBSVTN_MTH_TM_ID,
+                snp.MTH_TM_ID AS OBSVTN_MTH_TM_ID,
                 b.BASEL_ACCT_ID,
                 b.LAST_NEW_DEFAULT_OS_BAL_AMT AS LAST_NEW_DFT_BAL_AMT,
                 b.LAST_NEW_DEFAULT_DATE AS LAST_NEW_DFT_TM_ID,
@@ -342,17 +411,30 @@ def duckdb_load(
                 CURRENT_TIMESTAMP AS INSRT_PROCESS_TMSTMP,
                 CURRENT_TIMESTAMP AS UPDT_PROCESS_TMSTMP,
                 mth_tm_id.val AS PROCESS_MTH_TM_ID
-            FROM emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS a
+            FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT snp
             CROSS JOIN mth_tm_id
+            INNER JOIN ingestion.TM_DIM obs_tm
+                ON snp.MTH_TM_ID = obs_tm.TM_ID
+               AND TRIM(obs_tm.TM_LVL) = 'Month'
             INNER JOIN lgd b
-                ON a.BASEL_ACCT_ID = b.BASEL_ACCT_ID
+                ON snp.BASEL_ACCT_ID = b.BASEL_ACCT_ID
             INNER JOIN ingestion.TM_DIM t
                 ON b.LAST_NEW_DEFAULT_DATE = t.TM_ID
                AND TRIM(t.TM_LVL) = 'Month'
-            WHERE a.PIT_STAT_VER_2_CD <> 'CUR'
-              AND a.SML_BUS_F = 'N'
-              AND a.CONSM_PRD_TREATMNT_CD = 'A'
-              AND a.MTH_TM_ID = mth_tm_id.val - 24 * 40
+            INNER JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+                ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+               AND pit.OBSN_DT = obs_tm.TM_LVL_END_DT
+               AND pit.SRC_SYS_CD = 'KS'
+            INNER JOIN features.SML_BUS_F sml
+                ON snp.BASEL_ACCT_ID = sml.BASEL_ACCT_ID
+               AND sml.OBSN_DT = obs_tm.TM_LVL_END_DT
+            INNER JOIN features.CONSM_PRD_TREATMNT_CD trt
+                ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
+               AND trt.OBSN_DT = obs_tm.TM_LVL_END_DT
+            WHERE snp.MTH_TM_ID = mth_tm_id.val - 24 * 40
+              AND pit.PIT_STATUS_CROSS_DEFAULT_ORIG <> 'CUR'
+              AND sml.SML_BUS_F = 'N'
+              AND trt.CONSM_PRD_TREATMNT_CD = 'A'
         )
     SELECT * FROM pdead_rows
     UNION ALL

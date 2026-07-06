@@ -1,0 +1,33 @@
+# Properties for CiaD Jenkins deploy pipelines
+skipFortifyScan: true
+skipSonarScan: true
+skipUnitTests: true
+#deployScriptFile: sudo_deploy.sh
+#scriptCommand: ${serverName} cbs-1.0.zip
+#for script that package is zip, we must set zip.
+packageType: zip
+devServers:
+  -
+    name: DEV
+    address: 172.25.12.52
+    #deployer should be the CIAD id
+    deployer: ciad_bbcxd
+    deployLocation: /app/ciad_bbcxd
+
+stagingServers:
+  -
+    name: UAT
+    address: 172.25.161.11
+    #deployer should be the CIAD id
+    deployer: ciad_bbcxu
+    deployLocation: /app/ciad_bbcxu
+
+prodServers:
+  -
+    name: PROD
+    address: 172.25.152.15
+    #deployer should be the CIAD id
+    deployer: ciad_bbcxp
+    deployLocation: /app/ciad_bbcxp
+
+

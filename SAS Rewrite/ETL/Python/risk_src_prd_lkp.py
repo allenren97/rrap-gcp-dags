@@ -1,0 +1,72 @@
+#!/usr/bin/python
+#-*- coding:utf-8 -*-
+#===============================================================================
+#
+#         FILE: /app/bbcx_cbs_appid/ETL/python/risk_src_prd_lkp.py
+#
+#        USAGE: ./risk_src_prd_lkp.py business_date date_type
+#
+#  DESCRIPTION: ingestion job via ingestion framework, lookup table ingested by adhoc
+#
+#      OPTIONS: ---
+# REQUIREMENTS: two arguments: business date & date load type
+#         BUGS: ---
+#        NOTES: Template updated for risk_src_prd_lkp table load, by Gordana
+#       AUTHOR: Justin Liu 
+#      COMPANY: bns
+#      VERSION: 1.0
+#      CREATED: 10/04/2018  
+#     REVIEWER: 
+#     REVISION: ---
+#    SRC_TABLE: tsz_rma.airb_src_prd_lkp
+#    TGT_TABLE: crz_cust_scorecard.risk_src_prd_lkp
+#===============================================================================
+import sys,re,os
+import subprocess
+from datetime import datetime
+import argparse
+from hive_task import CBS_Configuration
+
+
+	
+cf = CBS_Configuration()
+
+
+
+# insert into table risk_src_prd_lkp table by adhoc
+
+SQL1 = """
+set hive.exec.dynamic.partition.mode=nonstrict;
+insert overwrite table """ + cf.CBSDBName + """.risk_src_prd_lkp partition (eff_dt)
+select 
+   current_timestamp() as insrt_process_tmstmp
+  ,'""" + os.path.realpath(__file__) + """' as op_field
+  ,prd_sys_cd              
+  ,src_prd_cd              
+  ,src_sub_prd_cd          
+  ,basel_prd_cd            
+  ,basel_prd_desc          
+  ,prd_desc                
+  ,ltv_tp_cd               
+  ,sml_bus_f               
+  ,consm_scorecrd_exclsn_f 
+  ,consm_prd_treatmnt_cd   
+  ,businesseffectivedate as eff_dt
+from """ + cf.TSZRMADBName + """.airb_src_prd_lkp
+where businesseffectivedate in (select max(businesseffectivedate) from """ + cf.TSZRMADBName + """.airb_src_prd_lkp)
+"""
+ 
+sqls=map(lambda r:r[1],sorted([(int(k.split('SQL')[1]),v) for k,v in locals().items() if k.startswith('SQL')],key=lambda r:r[0]))
+
+def main():
+
+	for sql in sqls:
+		print ("[Info]: " + str(datetime.now()) + " begin to run hive sql.")
+		cf.hive_exec(sql)
+		print ("[Info]: " + str(datetime.now()) + " finished to run hive sql successfully.")
+		
+
+
+if __name__ == '__main__':
+	main()
+

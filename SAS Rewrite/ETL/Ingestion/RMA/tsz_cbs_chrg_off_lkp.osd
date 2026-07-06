@@ -1,0 +1,11 @@
+record
+  {final_delim=end, record_delim_string='\r\n', delim=',', quote=none}
+(
+  chrg_off_cd:nullable string[max=10]{null_field=''};
+  chrg_off_stat_flag:nullable string[max=1]{null_field=''};
+  chrg_off_stat_desc:nullable string[max=50]{null_field=''};
+  accrl_stat_flag:nullable string[max=1]{null_field=''};
+  accrl_stat_desc:nullable string[max=50]{null_field=''};
+)
+
+

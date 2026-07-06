@@ -112,12 +112,14 @@ UPSTREAM_ASSET = (
 
 DOWNSTREAM_ASSET = "instruments.BASEL_ANALYTCL_BL_INSTRUMNT_FACT"
 
+# Serialize exports: each 83-way join spills heavily to DuckDB temp storage.
+# Running all four in parallel exhausts /tmp and causes IOException on spill read.
 DEPENDENCIES = {
-    "duckdb_delete": ["export_ks", "export_spl", "export_mor", "export_tng"],
-    "export_ks": ["duckdb_load"],
-    "export_spl": ["duckdb_load"],
-    "export_mor": ["duckdb_load"],
-    "export_tng": ["duckdb_load"],
+    "export_ks": ["export_spl"],
+    "export_spl": ["export_mor"],
+    "export_mor": ["export_tng"],
+    "export_tng": ["duckdb_delete"],
+    "duckdb_delete": ["duckdb_load"],
 }
 
 
@@ -125,6 +127,8 @@ def export_ks(
     duckdb_conn_id="duckdb-conn",
     config_file="basel_analytcl_bl_instrmnt_fact.export_ks.sql",
     config_type="instrument",
+    resource_tier="HIGH",
+    pool_slots=96,
 ):
     pass
 
@@ -133,6 +137,8 @@ def export_spl(
     duckdb_conn_id="duckdb-conn",
     config_file="basel_analytcl_bl_instrmnt_fact.export_spl.sql",
     config_type="instrument",
+    resource_tier="HIGH",
+    pool_slots=96,
 ):
     pass
 
@@ -141,6 +147,8 @@ def export_mor(
     duckdb_conn_id="duckdb-conn",
     config_file="basel_analytcl_bl_instrmnt_fact.export_mor.sql",
     config_type="instrument",
+    resource_tier="HIGH",
+    pool_slots=96,
 ):
     pass
 
@@ -149,6 +157,8 @@ def export_tng(
     duckdb_conn_id="duckdb-conn",
     config_file="basel_analytcl_bl_instrmnt_fact.export_tng.sql",
     config_type="instrument",
+    resource_tier="HIGH",
+    pool_slots=96,
 ):
     pass
 
@@ -167,6 +177,8 @@ def duckdb_delete(
 def duckdb_load(
     trigger_rule="none_failed_min_one_success",
     duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
     sql=f"""
     INSERT INTO {DOWNSTREAM_ASSET} BY NAME
     FROM (

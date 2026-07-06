@@ -1,0 +1,16 @@
+Release Notes:
+
+Build number: cbs-0.6-b8
+Application/Project: CBS
+Deployment Environment: UAT
+Deployment Date: 28-Aug-2018
+Deployment Type: Automated- CPE
+Scope: Create Hive tables in the CRZ (UAT environment)
+New Data being ingested: No
+Onboarding RITM#: NA
+Ingestion tool used: Python Script
+Zone movement: CRZ
+Data extraction: NA
+******
+Link to Jenkins UAT: https://jenkins.agile.bns/job/rmascbs/job/rmas_cbs/job/STAGING/job/rmascbs-rmas_cbs-STAGING-release/
+

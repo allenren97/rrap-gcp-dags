@@ -1,0 +1,19 @@
+use crz_cust_scorecard;
+drop table if exists CBS_MODEL_SCORECRD_PROBE_FXD_LEN_OUTPUT;
+CREATE EXTERNAL TABLE CBS_MODEL_SCORECRD_PROBE_FXD_LEN_OUTPUT(
+    INSRT_PROCESS_TMSTMP    TIMESTAMP,
+    OP_FIELD                VARCHAR(1000),
+    RECRD_TYPE              VARCHAR(1),
+    PROC_DT                 VARCHAR(8),
+    PERIOD_IND              VARCHAR(1),
+    CUST_CID                VARCHAR(20),
+    SCORE                   VARCHAR(10),
+    BUFFER                  VARCHAR(55)
+)
+PARTITIONED BY( EFF_DT DATE COMMENT 'Effective Date', DATE_TYPE VARCHAR(20) COMMENT 'Date Type', SEG_NUM VARCHAR(5) COMMENT 'Segment Number')
+CLUSTERED BY (CUST_CID) SORTED BY (CUST_CID ASC) INTO 60 BUCKETS
+STORED AS ORC
+LOCATION '/data/crz/bbcx/crz_cust_scorecard.db/CBS_MODEL_SCORECRD_PROBE_FXD_LEN_OUTPUT'
+TBLPROPERTIES ('orc.compress' = 'SNAPPY')
+;
+

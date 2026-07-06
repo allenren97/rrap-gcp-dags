@@ -1,0 +1,32 @@
+use crz_cust_scorecard;
+drop table if exists RISK_IP_TERM_ACCT_SNAPSHOT;
+CREATE EXTERNAL TABLE RISK_IP_TERM_ACCT_SNAPSHOT(
+    TAS_PLAN_ACCT_NUM              VARCHAR(30),
+    TAS_TERM_INVESTMENT_CODE       VARCHAR(20),
+    INSRT_PROCESS_TIMESTMP         TIMESTAMP,
+    OP_FIELD                       VARCHAR(1000),
+    TAS_PRIMARY_OWNER_CIF_ID       VARCHAR(40),
+    TAS_CURRENT_BOOK_VALUE_SIGN    VARCHAR(10),
+    TAS_CURRENT_BOOK_VALUE         DECIMAL(18, 2),
+    TAS_CERTIFICATE_NO             VARCHAR(30),
+    TAS_CURRENCY_CODE              VARCHAR(10),
+    TAS_ISSUER_CODE                VARCHAR(20),
+    TAS_BNS_GL_ACCOUNT_NO          VARCHAR(20),
+    TAS_CERTIFICATE_STATUS         VARCHAR(20),
+    TAS_CERTIFICATE_STATUS_DT      DATE,
+    TAS_ISSUE_DT                   DATE,
+    TAS_TERM_DT                    DATE,
+    TAS_MATURITY_DT                DATE,
+    TAS_ORIGINAL_FACE_VALUE        DECIMAL(18, 2),
+    TAS_CURRENT_FACE_VALUE         DECIMAL(18, 2),
+    TAS_PREV_BAL                   DECIMAL(18, 2),
+    TAS_RISK                       VARCHAR(20),
+    TAS_OBJECTIVE                  VARCHAR(20)
+)
+PARTITIONED BY( EFF_DT DATE, DATE_TYPE VARCHAR(20) COMMENT 'Shows Date Type for the partition date columm - Daily,Monthly, Weekly, Ad-hoc etc')
+CLUSTERED BY (TAS_PRIMARY_OWNER_CIF_ID, TAS_PLAN_ACCT_NUM) SORTED BY (TAS_PRIMARY_OWNER_CIF_ID ASC, TAS_PLAN_ACCT_NUM ASC) INTO 60 BUCKETS
+STORED AS ORC
+LOCATION '/data/crz/bbcx/crz_cust_scorecard.db/RISK_IP_TERM_ACCT_SNAPSHOT'
+TBLPROPERTIES ('orc.compress' = 'SNAPPY')
+;
+

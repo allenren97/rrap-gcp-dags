@@ -1,0 +1,81 @@
+use crz_cust_scorecard;
+drop table if exists CBS_CUSTOMER_BASE;
+CREATE EXTERNAL TABLE CBS_CUSTOMER_BASE(
+    CUST_CID                        VARCHAR(40)      COMMENT 'Customer Identification',
+    INSRT_PROCESS_TMSTMP            TIMESTAMP        COMMENT 'Insert Process Timestamp (Time records was inserted into the table)',
+    OP_FIELD                        VARCHAR(1000),
+    CID_NUM                         VARCHAR(100)     COMMENT 'Customer Identification Number',
+    TM_ID                           VARCHAR(10)      COMMENT 'Time id corresponding to processing month date',
+    PROCESS_DT                      DATE             COMMENT 'Identifies the Effective End Date in DD/MM/YY format for the Time Level',
+    NUM_PRODS                       INT              COMMENT 'Number of Products aggregated based on number of lending products (Mortgage, SPL, Revolving)',
+    NUM_LEND_PRODS_CUR              INT              COMMENT 'Number of Current Lending Products',
+    NUM_LEND_PRODS_CLSD             INT              COMMENT 'Number of Closed Lending Products',
+    NUM_LEND_PRODS_BNKRPT           INT              COMMENT 'Number of Lending Products that are bankrupt',
+    NUM_LEND_PRODS_DEF              INT              COMMENT 'Number of Lending Products Defaulted',
+    NUM_LEND_PRODS_CHRG_OFF         INT              COMMENT 'Number of Lending Products Charged off',
+    NUM_LEND_PRODS_WRT_OFF          INT              COMMENT 'Number of Lending Products Written Off',
+    NUM_LEND_PRODS_COMM             INT              COMMENT 'Number of Commercial Lending Products (where product sub type is Business Line Visa ''BLV'')',
+    NUM_LEND_PRODS_COMM_CUR         INT              COMMENT 'Number of Current Commeercial Lending Products',
+    NUM_LEND_PRODS_COMM_CLSD        INT              COMMENT 'Number of Closed Commercial Lending Products',
+    NUM_LEND_PRODS_COMM_CHRG_OFF    INT              COMMENT 'Number of Commnercial Lending Products charged off',
+    NUM_LEND_PRODS_COMM_DEF         INT              COMMENT 'Number of Defaulted Commercial Lending Products',
+    NUM_LEND_PRODS_COMM_WRT_OFF     INT              COMMENT 'Number of Written Off Commercial Lending Products',
+    PRIVATE_BANK_IND                VARCHAR(1),
+    NUM_MORT                        INT              COMMENT 'Number of Mortgage Products',
+    NUM_SPL                         INT              COMMENT 'Number of Personal Loan Products',
+    NUM_REV                         INT,
+    NUM_SSL                         INT              COMMENT 'Number of Scotia Student Loans/Line Products',
+    NUM_LEND_PRODS                  INT              COMMENT 'Number of Total Lending Products (Current + Defaulted for Retail and Commercial)',
+    WORST_DLQ_DAYS                  INT              COMMENT 'Maximum Number of Days delinquency for a customer at observation date. Based on all customer’s products',
+    BASEL_CUST_ID                   VARCHAR(30),
+    BUREAU_EXIST                    VARCHAR(1)       COMMENT 'Indicator to suggest the customer information exists in creadit bureau file',
+    CUST_TYPE                       VARCHAR(30)      COMMENT 'Customer Type Code - Retail, Small Business, Commercial, Corporate',
+    CUST_STATUS                     VARCHAR(20)      COMMENT 'Customer Status - Open, Closed',
+    DECEASED_IND                    VARCHAR(1)       COMMENT 'Indicates if the customer is dead - Boolean Value (''Y'',''N'')',
+    BNKRPTCY_FLAG                   VARCHAR(1)       COMMENT 'Indicates if the customer has had a bankruptcy',
+    UNDER_18_FLAG                   VARCHAR(1)       COMMENT 'Indicates if  the customer is under the age of 18',
+    RETAIL_IND                      VARCHAR(1)       COMMENT 'Indicates Customer is Retail',
+    PRIME_IND                       VARCHAR(1)       COMMENT 'Indicates if the customer is primary customer',
+    SECONDARY_IND                   VARCHAR(1)       COMMENT 'Secondary Customer Indicator',
+    PRIME_IND_LEND                  VARCHAR(1)       COMMENT 'Primary customer on lending products only',
+    SECONDARY_IND_LEND              VARCHAR(1)       COMMENT 'Secondary customer on lending products only',
+    NUM_NONLEND_PRODS_ACT           INT              COMMENT 'Number of Active non lending products',
+    NUM_NONLEND_PRODS_PND_CLSR      INT              COMMENT 'Number of non lending  products that are pending closure',
+    NUM_NONLEND_PRODS_DOR           INT              COMMENT 'Number of non lending accounts Dormant',
+    NUM_NONLEND_PRODS_INACT         INT              COMMENT 'Number of non lending account that are Inactive',
+    NUM_NONLEND_PRODS_PND           INT              COMMENT 'Number of non lending proidcuts pending to be opened',
+    NUM_NONLEND_PRODS_STOLN         INT              COMMENT 'Number of non lending products Stolen',
+    NUM_NONLEND_PRODS_CLSD          INT              COMMENT 'Number of non lending products Closed',
+    NUM_NONLEND_PRODS_WRT_OFF       INT              COMMENT 'Number of non lending products Written off',
+    NUM_NONLEND_PRODS               INT              COMMENT 'Total number of non lending products',
+    DEP_ONLY_FLG                    VARCHAR(1)       COMMENT 'Deposit Only Product flag (Customer has deposit only acocunt wtih BNS)',
+    NOACCT_EXCL                     VARCHAR(1)       COMMENT 'No Active Account Exlusion flag (''Y'',''N'')',
+    BANKRUPTCY_EXCL                 VARCHAR(1)       COMMENT 'Bankruptcy Exclusion Flag (''Y'',''N'')',
+    UNDER_AGE_EXCL                  VARCHAR(1)       COMMENT 'Underage Exclusion Flag (''Y'',''N'')',
+    CUST_PIT_STAT                   VARCHAR(10)      COMMENT 'Point in Time Status for Customer',
+    MIN_LTV                         DOUBLE,
+    MAX_LTV                         DOUBLE,
+    AVG_LTV                         DOUBLE,
+    MIN_LTV_HELOC                   DOUBLE,
+    MAX_LTV_HELOC                   DOUBLE,
+    AVG_LTV_HELOC                   DOUBLE,
+    WORST_DAYS_DLQ_CUST             INT              COMMENT 'Maximum Number of Days delinquency for a customer at observation date. Based on all customer’s products',
+    WORST_DAYS_DLQ_KQ_CUST          INT              COMMENT 'Maximum Number of Days customer was delinquent for Revolving Credit Account
+Calculated using products with Product specific PIT status in (''cur'',''def'')',
+    WORST_DAYS_DLQ_MORT_CUST        INT              COMMENT 'Maximum Number of Days customer was delinquent for Mortgage Account
+Calculated using products with Product specific PIT status in (''cur'',''def'')',
+    WORST_DAYS_DLQ_SPL_CUST         INT,
+    NUM_DELQ_ACCT                   INT              COMMENT 'Number of delinquent accounts for the customer
+Only includes Products with PIT status = current ',
+    CUST_DEFAULT_DATE               DATE             COMMENT 'Date customer was delinquent for 90 days or more',
+    CUST_DEFAULT_IND                VARCHAR(10)      COMMENT 'Model Predicted Indicator for customer default',
+    CORP_COMM_EXCL                  VARCHAR(1)       COMMENT 'Commercial Customer Exclusion Flag',
+    STAFF_EXCL                      VARCHAR(1)       COMMENT 'Staff customer exclusion flag'
+)
+PARTITIONED BY( EFF_DT DATE COMMENT 'Effective date', DATE_TYPE VARCHAR(20) COMMENT 'Shows Date Type for the partition date columm - Daily,Monthly, Weekly, Adhoc etc')
+CLUSTERED BY (CUST_CID) SORTED BY (CUST_CID ASC) INTO 60 BUCKETS
+STORED AS ORC
+LOCATION '/data/crz/bbcx/crz_cust_scorecard.db/CBS_CUSTOMER_BASE'
+TBLPROPERTIES ('orc.compress' = 'SNAPPY')
+;
+

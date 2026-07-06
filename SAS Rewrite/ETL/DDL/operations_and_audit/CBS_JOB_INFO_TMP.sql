@@ -1,0 +1,44 @@
+Use CRZ_CUST_SCORECARD;
+DROP TABLE IF EXISTS CBS_JOB_INFO_TMP;
+CREATE TABLE CBS_JOB_INFO_TMP(
+    JOB_ID                  INT,
+    JOB_NM                  VARCHAR(100),
+    TARGET_SCHEMA_NM        VARCHAR(100),
+    TARGET_TBL_NM           VARCHAR(100),
+    TARGET_COL_NM           VARCHAR(100),
+    TARGET_SQL_CRTRIA       VARCHAR(1000),
+    SRC_SCHEMA_NM           VARCHAR(100),
+    SRC_TBL_NM              VARCHAR(100),
+    SRC_COL_NM              VARCHAR(100),
+    SRC_SQL_CRTRIA          VARCHAR(1000),
+    DATA_LOAD_TYPE          VARCHAR(50),
+    CLNDR_TYPE              VARCHAR(10),
+    ACTIVE_F                VARCHAR(1)
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS INPUTFORMAT 'org.apache.hadoop.mapred.TextInputFormat' OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+LOCATION '/data/crz/bbcx/crz_cust_scorecard.db/CBS_JOB_INFO_TMP'
+TBLPROPERTIES("skip.header.line.count"="1");
+
+LOAD DATA  INPATH '/tmp/CBS_JOB_INFO.csv' overwrite  into table CBS_JOB_INFO_TMP;
+
+INSERT OVERWRITE TABLE CBS_JOB_INFO
+SELECT 
+  CURRENT_TIMESTAMP(),
+  JOB_ID,
+  JOB_NM,
+  TARGET_SCHEMA_NM, 
+  TARGET_TBL_NM, 
+  TARGET_COL_NM, 
+  TARGET_SQL_CRTRIA, 
+  SRC_SCHEMA_NM, 
+  SRC_TBL_NM, 
+  SRC_COL_NM, 
+  SRC_SQL_CRTRIA, 
+  DATA_LOAD_TYPE,
+  CLNDR_TYPE,
+  ACTIVE_F
+FROM CBS_JOB_INFO_TMP;
+
+

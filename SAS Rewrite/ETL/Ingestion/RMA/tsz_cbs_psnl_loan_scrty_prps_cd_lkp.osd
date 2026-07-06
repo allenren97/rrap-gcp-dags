@@ -1,0 +1,15 @@
+record
+  {final_delim=end, record_delim_string='\r\n', delim=',', quote=none}
+(
+  scrty_cd:int16;
+  prps_cd:int16;
+  scrty_desc:nullable string[max=30] {null_field=''};
+  tp:nullable string[max=10] {null_field=''};
+  prod:nullable string[max=60] {null_field=''};
+  sub_prod:nullable string[max=60] {null_field=''};
+  step_flag:nullable string[max=1] {null_field=''};
+  basel_prod:nullable string[max=60] {null_field=''};
+  basel_sub_prod:nullable string[max=60] {null_field=''};
+  basel_prod_abbr:nullable string[max=60] {null_field=''};
+  prod_id:nullable string[max=10] {null_field=''};
+)

@@ -1,0 +1,42 @@
+<project>
+  <modelVersion>4.0.0</modelVersion>
+    <groupId>com.bns.edl.cbs</groupId>
+  <artifactId>cbs</artifactId>
+  <name>cbs</name>
+  <version>1.1</version>
+  <properties>
+    <!-- WMEDL RELEASE VERSION -->
+    <!-- To be updated by incrementing for every release -->
+    <wmedl-release-version>11</wmedl-release-version>
+    <!-- WMEDL TAG ID -->
+    <!-- To be updated for every release with previous release TAG ID from BitBucket-->
+    <wmedl-tag-commit-id>17ae536754e0c963b41f9f9f8aedf82eaf1e1544</wmedl-tag-commit-id><!--latest tag id-->
+
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
+
+  </properties>
+  
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <version>2.5.3</version>
+        <configuration>
+          <descriptor>/Devops/src/assembly/bin.xml</descriptor>
+          <appendAssemblyId>false</appendAssemblyId>
+        </configuration>
+        <executions>
+          <execution>
+            <id>create-archive</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      
+     </plugins>
+  </build>
+</project>

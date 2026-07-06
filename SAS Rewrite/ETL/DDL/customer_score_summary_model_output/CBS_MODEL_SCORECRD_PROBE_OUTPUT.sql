@@ -1,0 +1,17 @@
+use crz_cust_scorecard;
+drop table if exists CBS_MODEL_SCORECRD_PROBE_OUTPUT;
+CREATE EXTERNAL TABLE CBS_MODEL_SCORECRD_PROBE_OUTPUT(
+    CUST_CID                VARCHAR(20),
+    INSRT_PROCESS_TMSTMP    TIMESTAMP,
+    OP_FIELD                VARCHAR(1000),
+    SEG_NUM                 INT,
+    SCORE                   INT,
+    PERIOD_IND              VARCHAR(1)
+)
+PARTITIONED BY( EFF_DT DATE, DATE_TYPE VARCHAR(20))
+CLUSTERED BY (CUST_CID) SORTED BY (CUST_CID ASC) INTO 60 BUCKETS
+STORED AS ORC
+LOCATION '/data/crz/bbcx/crz_cust_scorecard.db/CBS_MODEL_SCORECRD_PROBE_OUTPUT'
+TBLPROPERTIES ('orc.compress' = 'SNAPPY')
+;
+
