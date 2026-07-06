@@ -33,8 +33,9 @@ DEPENDENCIES = {
     "duckdb_delete": ["export_dataprep_pdead", "export_dataprep_lgd"],
     "export_dataprep_pdead": ["export_pdead"],
     "export_dataprep_lgd": ["export_lgd"],
-    "export_pdead": ["duckdb_load"],
-    "export_lgd": ["duckdb_load"],
+    "export_pdead": ["export_result"],
+    "export_lgd": ["export_result"],
+    "export_result": ["duckdb_load"],
 }
 
 # Shared CASE from rrap_defaulter_model.sas (used by export_pdead and export_lgd).
@@ -124,26 +125,75 @@ _DATAPREP_SQL = """
         ON snp.MTH_TM_ID = tm.TM_ID
        AND TRIM(tm.TM_LVL) = 'Month'
     CROSS JOIN mth_tm_id
-    LEFT JOIN features.BASEL_PRD_CD prd
+    -- Each feature is joined as a deduped subquery (one row per BASEL_ACCT_ID +
+    -- OBSN_DT) so a duplicate key cannot multiply the fact grain. The SAS sources
+    -- all of these from the single KS table BASEL_REVLVNG_CR_BASE_DRVD_VARS, so
+    -- the source-partitioned features (CONSM_PRD_TREATMNT_CD, TRNST_EXCLSN_F, PIT)
+    -- are pinned to SRC_SYS_CD = 'KS'.
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OBSN_DT, BASEL_PRD_CD
+        FROM features.BASEL_PRD_CD
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY BASEL_PRD_CD DESC NULLS LAST
+        ) = 1
+    ) prd
         ON snp.BASEL_ACCT_ID = prd.BASEL_ACCT_ID
        AND prd.OBSN_DT = tm.TM_LVL_END_DT
-    LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OBSN_DT, PIT_STATUS_CROSS_DEFAULT_ORIG
+        FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG
+        WHERE SRC_SYS_CD = 'KS'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
+        ) = 1
+    ) pit
         ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
        AND pit.OBSN_DT = tm.TM_LVL_END_DT
-       AND pit.SRC_SYS_CD = 'KS'
-    LEFT JOIN features.HELOC_F heloc
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OBSN_DT, HELOC_F
+        FROM features.HELOC_F
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY HELOC_F DESC NULLS LAST
+        ) = 1
+    ) heloc
         ON snp.BASEL_ACCT_ID = heloc.BASEL_ACCT_ID
        AND heloc.OBSN_DT = tm.TM_LVL_END_DT
-    LEFT JOIN features.ACCRL_STAT_F accrl
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OBSN_DT, ACCRL_STAT_F
+        FROM features.ACCRL_STAT_F
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY ACCRL_STAT_F DESC NULLS LAST
+        ) = 1
+    ) accrl
         ON snp.BASEL_ACCT_ID = accrl.BASEL_ACCT_ID
        AND accrl.OBSN_DT = tm.TM_LVL_END_DT
-    LEFT JOIN features.CONSM_PRD_TREATMNT_CD trt
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OBSN_DT, CONSM_PRD_TREATMNT_CD
+        FROM features.CONSM_PRD_TREATMNT_CD
+        WHERE SRC_SYS_CD = 'KS'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY CONSM_PRD_TREATMNT_CD DESC NULLS LAST
+        ) = 1
+    ) trt
         ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
        AND trt.OBSN_DT = tm.TM_LVL_END_DT
-    LEFT JOIN features.SML_BUS_F sml
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OBSN_DT, SML_BUS_F
+        FROM features.SML_BUS_F
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY SML_BUS_F DESC NULLS LAST
+        ) = 1
+    ) sml
         ON snp.BASEL_ACCT_ID = sml.BASEL_ACCT_ID
        AND sml.OBSN_DT = tm.TM_LVL_END_DT
-    LEFT JOIN features.TRNST_EXCLSN_F trnst
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OBSN_DT, TRNST_EXCLSN_F
+        FROM features.TRNST_EXCLSN_F
+        WHERE SRC_SYS_CD = 'KS'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY TRNST_EXCLSN_F DESC NULLS LAST
+        ) = 1
+    ) trnst
         ON snp.BASEL_ACCT_ID = trnst.BASEL_ACCT_ID
        AND trnst.OBSN_DT = tm.TM_LVL_END_DT
 """
@@ -334,12 +384,11 @@ def export_lgd(
     pass
 
 
-def duckdb_load(
+def export_result(
     duckdb_conn_id="duckdb-conn",
     resource_tier="HIGH",
     pool_slots=96,
     sql=f"""
-    INSERT INTO {DOWNSTREAM_ASSET} BY NAME
     WITH
         mth_tm_id AS (
             SELECT {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS val
@@ -381,14 +430,33 @@ def duckdb_load(
             INNER JOIN ingestion.TM_DIM t
                 ON b.LAST_NEW_DEFAULT_DATE = t.TM_ID
                AND TRIM(t.TM_LVL) = 'Month'
-            INNER JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, PIT_STATUS_CROSS_DEFAULT_ORIG
+                FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
+                ) = 1
+            ) pit
                 ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
                AND pit.OBSN_DT = obs_tm.TM_LVL_END_DT
-               AND pit.SRC_SYS_CD = 'KS'
-            INNER JOIN features.SML_BUS_F sml
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, SML_BUS_F
+                FROM features.SML_BUS_F
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY SML_BUS_F DESC NULLS LAST
+                ) = 1
+            ) sml
                 ON snp.BASEL_ACCT_ID = sml.BASEL_ACCT_ID
                AND sml.OBSN_DT = obs_tm.TM_LVL_END_DT
-            INNER JOIN features.CONSM_PRD_TREATMNT_CD trt
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, CONSM_PRD_TREATMNT_CD
+                FROM features.CONSM_PRD_TREATMNT_CD
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY CONSM_PRD_TREATMNT_CD DESC NULLS LAST
+                ) = 1
+            ) trt
                 ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
                AND trt.OBSN_DT = obs_tm.TM_LVL_END_DT
             WHERE snp.MTH_TM_ID = mth_tm_id.val - 12 * 40
@@ -421,14 +489,33 @@ def duckdb_load(
             INNER JOIN ingestion.TM_DIM t
                 ON b.LAST_NEW_DEFAULT_DATE = t.TM_ID
                AND TRIM(t.TM_LVL) = 'Month'
-            INNER JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, PIT_STATUS_CROSS_DEFAULT_ORIG
+                FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
+                ) = 1
+            ) pit
                 ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
                AND pit.OBSN_DT = obs_tm.TM_LVL_END_DT
-               AND pit.SRC_SYS_CD = 'KS'
-            INNER JOIN features.SML_BUS_F sml
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, SML_BUS_F
+                FROM features.SML_BUS_F
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY SML_BUS_F DESC NULLS LAST
+                ) = 1
+            ) sml
                 ON snp.BASEL_ACCT_ID = sml.BASEL_ACCT_ID
                AND sml.OBSN_DT = obs_tm.TM_LVL_END_DT
-            INNER JOIN features.CONSM_PRD_TREATMNT_CD trt
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, CONSM_PRD_TREATMNT_CD
+                FROM features.CONSM_PRD_TREATMNT_CD
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY CONSM_PRD_TREATMNT_CD DESC NULLS LAST
+                ) = 1
+            ) trt
                 ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
                AND trt.OBSN_DT = obs_tm.TM_LVL_END_DT
             WHERE snp.MTH_TM_ID = mth_tm_id.val - 24 * 40
@@ -439,6 +526,21 @@ def duckdb_load(
     SELECT * FROM pdead_rows
     UNION ALL
     SELECT * FROM lgd_rows
+    """,
+):
+    pass
+
+
+def duckdb_load(
+    duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
+    sql=f"""
+    INSERT INTO {DOWNSTREAM_ASSET} BY NAME
+    SELECT *
+    FROM read_parquet(
+        '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_result", key="parquet") }}}}'
+    )
     """,
 ):
     pass
