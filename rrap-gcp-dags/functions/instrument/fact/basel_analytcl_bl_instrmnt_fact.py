@@ -5,7 +5,7 @@ Mirrors J_RRAP_2700 / J_PLL_BASEL_ANALYTCL_BL_INSTRMNT_FACT output shape by left
 all account-level instruments.fact loaders on (OBSN_DT, BASEL_ACCT_ID, STREAM).
 
 Spine: instruments.PIT_STAT_CD (KS, MOR, SPL, TNG-MOR).
-SQL: conf/{non_resl,resl,ifrs9}/instruments/fact/basel_analytcl_bl_instrmnt_fact.export_{ks,mor,spl,tng}.sql
+SQL: conf/{stream}/instruments/fact/basel_analytcl_bl_instrmnt_fact.export_{ks,mor,spl,tng}.sql
 
 Prerequisite: run instrument fact column DAGs for the process month before this job.
 instruments.FINAL_RTO is excluded (model/segment grain, not account grain).
@@ -113,11 +113,11 @@ UPSTREAM_ASSET = (
 DOWNSTREAM_ASSET = "instruments.BASEL_ANALYTCL_BL_INSTRUMNT_FACT"
 
 DEPENDENCIES = {
-    "export_ks": ["duckdb_delete"],
-    "export_spl": ["duckdb_delete"],
-    "export_mor": ["duckdb_delete"],
-    "export_tng": ["duckdb_delete"],
-    "duckdb_delete": ["duckdb_load"],
+    "duckdb_delete": ["export_ks", "export_spl", "export_mor", "export_tng"],
+    "export_ks": ["duckdb_load"],
+    "export_spl": ["duckdb_load"],
+    "export_mor": ["duckdb_load"],
+    "export_tng": ["duckdb_load"],
 }
 
 
@@ -165,6 +165,7 @@ def duckdb_delete(
 
 
 def duckdb_load(
+    trigger_rule="none_failed_min_one_success",
     duckdb_conn_id="duckdb-conn",
     sql=f"""
     INSERT INTO {DOWNSTREAM_ASSET} BY NAME
