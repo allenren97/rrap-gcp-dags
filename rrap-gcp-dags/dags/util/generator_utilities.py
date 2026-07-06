@@ -183,6 +183,10 @@ def _create_task_group_from_module(
                     @task.export(**task_args)
                     def dynamic_task(attr=attr, task_args=task_args):
                         return attr()
+                elif "beeline" in attr_name:
+                    @task.beeline(**task_args)
+                    def dynamic_task(attr=attr, task_args=task_args):
+                        return attr()
                 elif "branch" in attr_name:
                     @task.branch(**task_args)
                     def dynamic_task(attr=attr, task_args=task_args):

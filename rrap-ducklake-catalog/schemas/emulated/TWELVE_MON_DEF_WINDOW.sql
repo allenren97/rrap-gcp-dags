@@ -1,5 +1,7 @@
 -- BNS mortgage 12-month PD default observation windows (nzuser.twelve_mon_def_window).
--- One row per (MORTGAGE_NO, PROCESS_DATE) where PROCESS_DATE is the obs-window start month-end.
+-- One row per (MORTGAGE_NO, WINDOW_END_DT). WINDOW_END_DT identifies the window
+-- (obs-window start + 12 months, month-end). PROCESS_DATE matches the SAS: the
+-- process_date of the last observation in the window (highest filled slot).
 CREATE TABLE IF NOT EXISTS emulated.TWELVE_MON_DEF_WINDOW (
     OBSN_DT DATE NOT NULL,
     STREAM VARCHAR NOT NULL,
