@@ -4,22 +4,58 @@ Rewrite of J_RRAP_TL10_2201_PSNL_LOAN_OBSVTN_PT_DRVD_VAR.sas only.
 Builds emulated.PSNL_LOAN_OBSVTN_PT_DRVD_VAR for the current process month:
   - LGDD path (PIT_STAT_VER_2_CD = 'DEF')
   - LGDND path (PIT_STAT_VER_2_CD = 'CUR')
+
+Uses ingestion snapshot + features.* (PIT, treatment, sub-portfolio) keyed by
+TM_DIM month-end. Does not use emulated BASEL_PSNL_LOAN_ACCT_DRVD_VARS (2105)
+or BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 (2104).
 """
 
 UPSTREAM_ASSET = [
     "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
     "ingestion.TM_DIM",
-    "emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS",
-    "emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2",
+    "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
+    "features.TREATMENT_F",
+    "features.SUB_PORT_F",
 ]
 
 DOWNSTREAM_ASSET = "emulated.PSNL_LOAN_OBSVTN_PT_DRVD_VAR"
 
-_STREAM = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}'
-
 DEPENDENCIES = {
     "duckdb_delete": ["duckdb_load"],
 }
+
+_SPL_ACCT_FEATS = """
+    spl_acct_feats AS (
+        SELECT
+            snp.MTH_TM_ID,
+            snp.BASEL_ACCT_ID,
+            tm.TM_LVL_END_DT AS PROCESS_DT,
+            TRIM(snp.CRNT_BR_LOCTN_TRNST) AS CAB,
+            TRIM(snp.LOAN_NUM) AS LOAN_NUM,
+            pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS PIT_STATUS_V2,
+            trt.TREATMENT_F AS TREATMNT_F,
+            sub.SUB_PORT_F AS SUB_PORTFL
+        FROM ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT snp
+        INNER JOIN ingestion.TM_DIM tm
+            ON snp.MTH_TM_ID = tm.TM_ID
+           AND TRIM(tm.TM_LVL) = 'Month'
+        CROSS JOIN lgdd_obs_tm lgdd
+        CROSS JOIN lgdnd_obs_tm lgdnd
+        LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+            ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+           AND pit.OBSN_DT = tm.TM_LVL_END_DT
+           AND pit.SRC_SYS_CD = 'SPL'
+        LEFT JOIN features.TREATMENT_F trt
+            ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
+           AND trt.OBSN_DT = tm.TM_LVL_END_DT
+        LEFT JOIN features.SUB_PORT_F sub
+            ON snp.BASEL_ACCT_ID = sub.BASEL_ACCT_ID
+           AND sub.OBSN_DT = tm.TM_LVL_END_DT
+           AND sub.SRC_SYS_CD = 'SPL'
+        WHERE snp.RECD_STAT_CD IN ('4', '5', '6', '7', '8')
+          AND snp.MTH_TM_ID BETWEEN lgdd.OBS_START_TM_ID AND lgdnd.OBS_END_TM_ID
+    ),
+"""
 
 
 def duckdb_delete(
@@ -94,15 +130,15 @@ def duckdb_load(
                 ON TRIM(start_tm.TM_LVL) = 'Month'
                AND start_tm.TM_LVL_END_DT = o.OBS_START_DT
         ),
+        {_SPL_ACCT_FEATS.strip()}
         max_non_def AS (
             SELECT
                 d.BASEL_ACCT_ID,
                 MAX(d.MTH_TM_ID) AS MAX_NON_DEF_TM_ID,
                 MAX(d.PROCESS_DT) AS MAX_NON_DEF_DT
-            FROM emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 d
+            FROM spl_acct_feats d
             CROSS JOIN lgdd_obs_tm o
-            WHERE d.STREAM = '{_STREAM}'
-              AND UPPER(TRIM(d.PIT_STATUS_V2)) = 'CUR'
+            WHERE UPPER(TRIM(d.PIT_STATUS_V2)) = 'CUR'
               AND d.MTH_TM_ID BETWEEN o.OBS_START_TM_ID AND o.OBS_END_TM_ID
             GROUP BY d.BASEL_ACCT_ID
         ),
@@ -111,21 +147,19 @@ def duckdb_load(
                 d.BASEL_ACCT_ID,
                 MIN(d.MTH_TM_ID) AS LAST_NEW_DFT_MTH_TM_ID,
                 MIN(d.PROCESS_DT) AS LAST_NEW_DFT_DT
-            FROM emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 d
+            FROM spl_acct_feats d
             INNER JOIN max_non_def m ON d.BASEL_ACCT_ID = m.BASEL_ACCT_ID
             CROSS JOIN lgdd_obs_tm o
-            WHERE d.STREAM = '{_STREAM}'
-              AND UPPER(TRIM(d.PIT_STATUS_V2)) = 'DEF'
+            WHERE UPPER(TRIM(d.PIT_STATUS_V2)) = 'DEF'
               AND d.MTH_TM_ID > m.MAX_NON_DEF_TM_ID
               AND d.MTH_TM_ID <= o.OBS_END_TM_ID
             GROUP BY d.BASEL_ACCT_ID
         ),
         pop_in_window AS (
             SELECT DISTINCT d.BASEL_ACCT_ID
-            FROM emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 d
+            FROM spl_acct_feats d
             CROSS JOIN lgdd_obs_tm o
-            WHERE d.STREAM = '{_STREAM}'
-              AND d.MTH_TM_ID BETWEEN o.OBS_START_TM_ID AND o.OBS_END_TM_ID
+            WHERE d.MTH_TM_ID BETWEEN o.OBS_START_TM_ID AND o.OBS_END_TM_ID
         ),
         never_cur AS (
             SELECT p.BASEL_ACCT_ID
@@ -137,11 +171,10 @@ def duckdb_load(
                 d.BASEL_ACCT_ID,
                 MIN(d.MTH_TM_ID) AS LAST_NEW_DFT_MTH_TM_ID,
                 MIN(d.PROCESS_DT) AS LAST_NEW_DFT_DT
-            FROM emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 d
+            FROM spl_acct_feats d
             INNER JOIN never_cur n ON d.BASEL_ACCT_ID = n.BASEL_ACCT_ID
             CROSS JOIN lgdd_obs_tm o
-            WHERE d.STREAM = '{_STREAM}'
-              AND UPPER(TRIM(d.PIT_STATUS_V2)) = 'DEF'
+            WHERE UPPER(TRIM(d.PIT_STATUS_V2)) = 'DEF'
               AND d.MTH_TM_ID BETWEEN o.OBS_START_TM_ID AND o.OBS_END_TM_ID
             GROUP BY d.BASEL_ACCT_ID
         ),
@@ -181,14 +214,10 @@ def duckdb_load(
             FROM lgdd_obs_tm o
             INNER JOIN ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT a
                 ON a.MTH_TM_ID = o.OBS_END_TM_ID
-            INNER JOIN emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS b
-                ON a.BASEL_ACCT_ID = b.BASEL_ACCT_ID
-               AND a.MTH_TM_ID = b.MTH_TM_ID
-               AND b.STREAM = '{_STREAM}'
-            INNER JOIN emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 c
+               AND a.RECD_STAT_CD IN ('4', '5', '6', '7', '8')
+            INNER JOIN spl_acct_feats c
                 ON a.BASEL_ACCT_ID = c.BASEL_ACCT_ID
                AND a.MTH_TM_ID = c.MTH_TM_ID
-               AND c.STREAM = '{_STREAM}'
                AND UPPER(TRIM(c.PIT_STATUS_V2)) = 'DEF'
                AND c.TREATMNT_F = 'A'
             INNER JOIN os_bal_at_def pf ON a.BASEL_ACCT_ID = pf.BASEL_ACCT_ID
@@ -204,10 +233,9 @@ def duckdb_load(
                     ORDER BY b.MTH_TM_ID
                 ) AS RN
             FROM ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT a
-            INNER JOIN emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 b
+            INNER JOIN spl_acct_feats b
                 ON a.MTH_TM_ID = b.MTH_TM_ID
                AND a.BASEL_ACCT_ID = b.BASEL_ACCT_ID
-               AND b.STREAM = '{_STREAM}'
             CROSS JOIN lgdnd_obs_tm o
             WHERE b.MTH_TM_ID BETWEEN o.OBS_START_TM_ID AND o.OBS_END_TM_ID
               AND UPPER(TRIM(b.PIT_STATUS_V2)) IN ('DEF', 'CHG')
@@ -224,10 +252,9 @@ def duckdb_load(
                 d.BASEL_ACCT_ID,
                 MIN(d.MTH_TM_ID) AS LAST_NEW_DFT_MTH_TM_ID,
                 MIN(d.PROCESS_DT) AS LAST_NEW_DFT_DT
-            FROM emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 d
+            FROM spl_acct_feats d
             CROSS JOIN lgdnd_obs_tm o
-            WHERE d.STREAM = '{_STREAM}'
-              AND UPPER(TRIM(d.PIT_STATUS_V2)) IN ('DEF', 'CHG')
+            WHERE UPPER(TRIM(d.PIT_STATUS_V2)) IN ('DEF', 'CHG')
               AND d.MTH_TM_ID BETWEEN o.OBS_START_TM_ID AND o.OBS_END_TM_ID
             GROUP BY d.BASEL_ACCT_ID
         ),
@@ -262,14 +289,10 @@ def duckdb_load(
             FROM lgdnd_obs_tm o
             INNER JOIN ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT a
                 ON a.MTH_TM_ID = o.OBS_START_TM_ID
-            INNER JOIN emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS b
-                ON a.BASEL_ACCT_ID = b.BASEL_ACCT_ID
-               AND a.MTH_TM_ID = b.MTH_TM_ID
-               AND b.STREAM = '{_STREAM}'
-            INNER JOIN emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 c
+               AND a.RECD_STAT_CD IN ('4', '5', '6', '7', '8')
+            INNER JOIN spl_acct_feats c
                 ON a.BASEL_ACCT_ID = c.BASEL_ACCT_ID
                AND a.MTH_TM_ID = c.MTH_TM_ID
-               AND c.STREAM = '{_STREAM}'
                AND UPPER(TRIM(c.PIT_STATUS_V2)) = 'CUR'
                AND c.TREATMNT_F = 'A'
             INNER JOIN filter_account fa ON a.BASEL_ACCT_ID = fa.BASEL_ACCT_ID
