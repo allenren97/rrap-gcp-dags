@@ -1,21 +1,19 @@
 """
-Gather instruments.BASEL_ANALYTCL_BL_INSTRUMNT_FACT from instruments.* column tables.
-
-Mirrors J_RRAP_2700 / J_PLL_BASEL_ANALYTCL_BL_INSTRMNT_FACT output shape by left-joining
-all account-level instruments.fact loaders on (OBSN_DT, BASEL_ACCT_ID, STREAM).
+Gather instruments.BASEL_ANALYTCL_BL_INSTRUMNT_FACT from instruments.* and features.*
 
 Spine: instruments.PIT_STAT_CD (KS, MOR, SPL, TNG-MOR).
+Gather joins instruments.* column loaders plus features where available
+(MORT_NUM, TRANSACTOR_FLAG_QRR, CMHC_F, DRAWN, MONTH_DEF / MONTH_DEF_24M).
 SQL: conf/{stream}/instruments/fact/basel_analytcl_bl_instrmnt_fact.export_{ks,mor,spl,tng}.sql
 
-Prerequisite: run instrument fact column DAGs for the process month before this job.
-instruments.FINAL_RTO is excluded (model/segment grain, not account grain).
+Prerequisite: instrument fact column DAGs for the process month (except columns
+sourced from features above). instruments.FINAL_RTO is excluded (segment grain).
 """
 
 _INSTRUMENT_TABLES = [
     "AMORT",
     "CCAR_BASEL_PRD_TP_NM",
     "CCAR_F",
-    "CONS_DFT_MTH_CNT",
     "CRNT_LTV_RTO",
     "CRNT_PRPTY_VAL_AMT",
     "DLGD_F",
@@ -102,6 +100,8 @@ _FEATURE_TABLES = [
     "TRANSACTOR_FLAG_QRR",
     "CMHC_F",
     "DRAWN",
+    "MONTH_DEF",
+    "MONTH_DEF_24M",
 ]
 
 UPSTREAM_ASSET = (
