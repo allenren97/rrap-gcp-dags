@@ -41,7 +41,6 @@ def beeline_extract(
     SELECT *
     FROM cbs_mdm_flags
     WHERE eff_dt = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
-      AND date_type = 'Monthly'
     """,
     target="cbs_mdm_flags.parquet",
     rundir="{{ task_instance.xcom_pull(task_ids='handle_month_context', key='RUNDIR') }}",
@@ -74,7 +73,7 @@ def duckdb_load(
         sensitivity_cd AS SENSITIVITY_CD,
         deceased_ind AS DECEASED_IND,
         cust_status AS CUST_STATUS,
-        bnkruptcy_flag AS BNKRPTCY_FLAG,
+        bnkrptcy_flag AS BNKRPTCY_FLAG,
         under_18_flag AS UNDER_18_FLAG,
         cust_type AS CUST_TYPE,
         time_on_books AS TIME_ON_BOOKS,
@@ -87,7 +86,6 @@ def duckdb_load(
     FROM read_parquet(
         '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.beeline_extract", key="parquet") }}}}'
     )
-    WHERE TRIM(COALESCE(CAST(party_id AS VARCHAR), '')) <> ''
     """,
 ):
     pass
