@@ -88,6 +88,7 @@ def source_ingestion():
     import_contents("taskgroups/sequences/sq044/group.py")
     import_contents("taskgroups/sequences/sq0051/group.py")
     import_contents("taskgroups/sequences/sq083/group.py")
+    import_contents("taskgroups/sequences/sq084/group.py")
 
     """
     Dependencies from handle_month_context to the first sequence
@@ -97,7 +98,8 @@ def source_ingestion():
         sq044, sq037, sq036, sq002, sq003,
         sq004, sq015, sq033, sq034, sq018,
         sq011, sq020, sq019, sq006, sq016,
-        sq005, sq023, sq001, sq008, sq007
+        sq005, sq023, sq001, sq008, sq007,
+        sq084
     ]
 
     """ Actual dependencies between sequences based on data."""

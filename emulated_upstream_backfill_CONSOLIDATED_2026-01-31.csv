@@ -1,0 +1,24 @@
+upstream_source,src_sys_cd,months_needed,window,start_month,end_month,driven_by
+ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT,,49,P-48 to P,2022-01-31,2026-01-31,driven by PSNL obs
+ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT,,38,P-48..P-24 and P-12..P (gap skippable),2022-01-31,2026-01-31,driven by REVLVNG obs
+ingestion.MORTGAGE_HIST,,39,P-38 to P,2022-11-30,2026-01-31,driven by STATUS_FINAL x39
+ingestion.BASEL_MORT_MTH_SNAPSHOT,,1,P only,2026-01-31,2026-01-31,
+ingestion.BASEL_PSNL_LN_SUBV_MST_SNAPSHT_NEW,,1,P only,2026-01-31,2026-01-31,
+ingestion.BASEL_ACCT_DIM,,1,P only (dimension),2026-01-31,2026-01-31,
+ingestion.TM_DIM,,all,calendar (>= 2022-01),,,load once
+features.PIT_STATUS_CROSS_DEFAULT_ORIG,SPL,49,P-48 to P,2022-01-31,2026-01-31,PSNL obs
+features.PIT_STATUS_CROSS_DEFAULT_ORIG,KS,38,P-48..P-24 and P-12..P,2022-01-31,2026-01-31,REVLVNG obs
+features.PIT_STATUS_CROSS_DEFAULT_ORIG,MOR,39,P-38 to P,2022-11-30,2026-01-31,STATUS_FINAL x39
+features.TREATMENT_F,SPL,49,P-48 to P,2022-01-31,2026-01-31,PSNL obs
+features.MORT_NUM,MOR,39,P-38 to P,2022-11-30,2026-01-31,STATUS_FINAL x39
+features.BASEL_PRD_CD,,38,P-48..P-24 and P-12..P,2022-01-31,2026-01-31,REVLVNG obs
+features.HELOC_F,,38,P-48..P-24 and P-12..P,2022-01-31,2026-01-31,REVLVNG obs
+features.ACCRL_STAT_F,,38,P-48..P-24 and P-12..P,2022-01-31,2026-01-31,REVLVNG obs
+features.SUB_PORT_F,SPL,2,"anchors P-24, P-12",2024-01-31,2025-01-31,PSNL obs anchors
+features.SML_BUS_F,,2,"anchors P-24, P-12",2024-01-31,2025-01-31,REVLVNG anchors
+features.CONSM_PRD_TREATMNT_CD,KS,3,"P-24, P-12, P",2024-01-31,2026-01-31,REVLVNG anchors + 2103
+features.TRNST_EXCLSN_F,KS,1,P only,2026-01-31,2026-01-31,used by 2103
+features.PIT_STAT_VER_2_CD90,,1,P only,2026-01-31,2026-01-31,2103
+features.PIT_STAT_VER_2_CD180,,1,P only,2026-01-31,2026-01-31,2103
+reference.* (all lkps),,static,load once,,,"BLOCK_RECL, CHRG_OFF, SRC_PRD, TRNST_EXCLSN, PSNL_LOAN_SCRTY, RPTG_PRD"
+crz_cust_scorecard.cbs_mdm_flags (Hive),,1,P only,2026-01-31,2026-01-31,sq084

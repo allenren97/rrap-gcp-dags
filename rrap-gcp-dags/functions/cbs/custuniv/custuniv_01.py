@@ -40,6 +40,7 @@ UPSTREAM_ASSET = [
     "emulated.PSNL_LOAN_OBSVTN_PT_DRVD_VAR",
     "emulated.STATUS_FINAL",
     "emulated.TWELVE_MON_DEF_WINDOW",
+    "cbs.MDMFLAGS_OK",  # gate: mdmflags_check must pass before the whole chain runs
 ]
 
 DOWNSTREAM_ASSET = "cbs.CIS_DATA_POP_02"
