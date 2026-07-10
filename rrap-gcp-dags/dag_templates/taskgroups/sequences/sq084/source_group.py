@@ -26,7 +26,7 @@ def create_sq084_rundir():
     target="cbs_mdm_flags.parquet",
 )
 def get_cbs_mdm_flags():
-    """Extract crz_cust_scorecard.cbs_mdm_flags for month-end (copy half of J_CBS_0000)."""
+    """Extract crz_cust_scorecard.cbs_mdm_flags for month-end."""
     pass
 
 
