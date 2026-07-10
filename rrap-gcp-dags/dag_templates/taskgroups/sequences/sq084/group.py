@@ -11,8 +11,7 @@ def sq084_start():
 @task_group(group_id="sq084")
 def sq084_group():
     """
-    TaskGroup for sequence sq084 (CBS_MDM_FLAGS direct Hive load).
-    Replaces the copy portion of J_CBS_0000_MDMFLAGS_CHECK.sas.
+    TaskGroup for sequence sq084.
     """
 
     @task_group(group_id="sq084_source")

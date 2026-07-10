@@ -10281,8 +10281,7 @@ def source_ingestion():
     @task_group(group_id="sq084")
     def sq084_group():
         """
-        TaskGroup for sequence sq084 (CBS_MDM_FLAGS direct Hive load).
-        Replaces the copy portion of J_CBS_0000_MDMFLAGS_CHECK.sas.
+        TaskGroup for sequence sq084.
         """
 
         @task_group(group_id="sq084_source")
@@ -10293,10 +10292,7 @@ def source_ingestion():
             # Import of source_group.py
             @task
             def create_sq084_rundir():
-                """
-                Task to create RUNDIR for sequence sq084 (CBS_MDM_FLAGS).
-                RUNDIR is the directory where extracted data for the sequence is stored.
-                """
+                """Create sq084 run directory."""
                 context = get_current_context()
                 rundir = context["ti"].xcom_pull(task_ids="handle_month_context", key="RUNDIR")
                 sq084_rundir = f"{rundir}/sq084"
@@ -10304,34 +10300,28 @@ def source_ingestion():
 
 
             @task.beeline(
-                task_id="extract_cbs_mdm_flags",
+                task_id="get_cbs_mdm_flags",
                 beeline_conn_id="edlr-conn",
                 sql="""
-                use crz_cust_scorecard;
-                SELECT *
-                FROM cbs_mdm_flags
-                WHERE eff_dt = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="RUNDATE") }}'
+                    select *
+                    from crz_cust_scorecard.cbs_mdm_flags
+                    where eff_dt = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="MTH_END_DT") }}';
                 """,
-                target="cbs_mdm_flags.parquet",
                 rundir="{{ task_instance.xcom_pull(task_ids='handle_month_context', key='RUNDIR') }}/sq084",
                 to_parquet=True,
                 strings_can_be_null=True,
                 tmpfileloc="/bns/rrap/data/tmp",
+                target="cbs_mdm_flags.parquet",
             )
-            def extract_cbs_mdm_flags():
-                """
-                Extract crz_cust_scorecard.cbs_mdm_flags for the process month (eff_dt) -> parquet.
-                Replaces the copy portion of J_CBS_0000_MDMFLAGS_CHECK.sas.
-                """
+            def get_cbs_mdm_flags():
+                """Extract crz_cust_scorecard.cbs_mdm_flags for month-end (copy half of J_CBS_0000)."""
                 pass
 
 
-            """ TaskFlow function definitions """
-            create_sq084_rundir = create_sq084_rundir()
-            extract_cbs_mdm_flags = extract_cbs_mdm_flags()
+            rundir_task = create_sq084_rundir()
+            extract_task = get_cbs_mdm_flags()
 
-            """ Dependency chaining """
-            create_sq084_rundir >> extract_cbs_mdm_flags
+            rundir_task >> extract_task
         @task_group(group_id="sq084_enrichment")
         def sq084_enrichment_group():
             """
@@ -10342,12 +10332,12 @@ def source_ingestion():
                 duckdb_conn_id="duckdb-conn",
                 sql="""
                     DELETE FROM emulated.CBS_MDM_FLAGS
-                    WHERE EFF_DT = DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="RUNDATE") }}'
+                    WHERE EFF_DT = DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="MTH_END_DT") }}'
                       AND STREAM = 'CBS'
                 """,
             )
             def delete_cbs_mdm_flags():
-                """ Clear the (EFF_DT, STREAM) partition before reload (idempotent re-runs). """
+                """Clear the (EFF_DT, STREAM) partition before reload (idempotent re-runs)."""
                 pass
 
 
@@ -10357,44 +10347,29 @@ def source_ingestion():
                 sql="""
                     INSERT INTO emulated.CBS_MDM_FLAGS BY NAME
                     SELECT
-                        CAST(eff_dt AS DATE) AS EFF_DT,
+                        * EXCLUDE (op_field),
                         'CBS' AS STREAM,
                         {{ task_instance.xcom_pull(task_ids="handle_month_context", key="MTH_TM_ID") }} AS MTH_TM_ID,
-                        date_type AS DATE_TYPE,
-                        TRIM(CAST(party_id AS VARCHAR)) AS PARTY_ID,
-                        pref_lang AS PREF_LANG,
-                        gender_cd AS GENDER_CD,
-                        marital_status AS MARITAL_STATUS,
-                        emp_type_cd AS EMP_TYPE_CD,
-                        occup_cd AS OCCUP_CD,
-                        occup_type_cd AS OCCUP_TYPE_CD,
-                        occup_stat_cd AS OCCUP_STAT_CD,
-                        occup_cat_cd AS OCCUP_CAT_CD,
-                        transit_num AS TRANSIT_NUM,
-                        sensitivity_cd AS SENSITIVITY_CD,
-                        deceased_ind AS DECEASED_IND,
-                        cust_status AS CUST_STATUS,
-                        bnkrptcy_flag AS BNKRPTCY_FLAG,
-                        under_18_flag AS UNDER_18_FLAG,
-                        cust_type AS CUST_TYPE,
-                        time_on_books AS TIME_ON_BOOKS,
-                        CAST(cust_age AS INTEGER) AS CUST_AGE,
-                        COALESCE(TRY_CAST(insrt_process_tmstmp AS TIMESTAMP), CURRENT_TIMESTAMP) AS INSRT_PROCESS_TMSTMP,
                         CURRENT_TIMESTAMP AS UPDT_PROCESS_TMSTMP
-                    FROM '{{ task_instance.xcom_pull(task_ids="sq084.sq084_source.extract_cbs_mdm_flags", key="parquet") }}'
+                    FROM '{{ task_instance.xcom_pull(task_ids='handle_month_context', key='RUNDIR') }}/sq084/cbs_mdm_flags.parquet'
                 """,
             )
             def load_cbs_mdm_flags():
-                """ Load extracted MDM flags into emulated.CBS_MDM_FLAGS (drops op_field). """
+                """
+                Load extracted MDM flags into emulated.CBS_MDM_FLAGS.
+                Bare SELECT * from the parquet, minus op_field, plus the target-only columns
+                STREAM / MTH_TM_ID / UPDT_PROCESS_TMSTMP. All other Hive columns map by name
+                (eff_dt->EFF_DT, bnkrptcy_flag->BNKRPTCY_FLAG, etc.).
+                """
                 pass
 
 
             """ TaskFlow function definitions """
-            delete_cbs_mdm_flags = delete_cbs_mdm_flags()
-            load_cbs_mdm_flags = load_cbs_mdm_flags()
+            delete_cbs_mdm_flags_task = delete_cbs_mdm_flags()
+            load_cbs_mdm_flags_task = load_cbs_mdm_flags()
 
             """ Dependency chaining """
-            delete_cbs_mdm_flags >> load_cbs_mdm_flags
+            delete_cbs_mdm_flags_task >> load_cbs_mdm_flags_task
         sq084_source_group = sq084_source_group()
         sq084_enrichment_group = sq084_enrichment_group()
 
