@@ -1,10 +1,3 @@
-"""
-Rewrite of J_RRII_KS10_2107_BASEL_MORT_ACCT_DRVD_VARS.sas only.
-
-Builds emulated.BASEL_MORT_ACCT_DRVD_VARS in a single DuckDB pipeline mirroring
-the SAS job (delinquency, commercial/residential, PIT v1, step and exclusion flags).
-"""
-
 UPSTREAM_ASSET = [
     "ingestion.BASEL_MORT_MTH_SNAPSHOT",
     "ingestion.BASEL_ACCT_DIM",
@@ -117,9 +110,9 @@ def duckdb_load(
                     WHEN s.PD_OFF_DT IS NOT NULL OR TRIM(COALESCE(s.PD_OFF_F, '')) = 'Y'
                     THEN 0
                     WHEN TRIM(COALESCE(s.FLOAT_CD, '')) IN ('W', 'B', 'S')
-                         AND s.WK_FRST_UNPAID_DT IS NOT NULL
                     THEN
                         CASE
+                            WHEN s.WK_FRST_UNPAID_DT IS NULL THEN NULL
                             WHEN lbd.LAST_BUSINESS_DAY < s.WK_FRST_UNPAID_DT THEN 0
                             ELSE DATE_DIFF('day', s.WK_FRST_UNPAID_DT, lbd.LAST_BUSINESS_DAY)
                         END

@@ -48,13 +48,6 @@ _DEFAULT_BAL = "COALESCE(\n                " + ",\n                ".join(
     for i in range(12, 0, -1)
 ) + "\n            )"
 
-# SAS process_date at output = the row that triggered output (counter=13 or last obs
-# for the mortgage), i.e. the process_date at the highest filled slot (<=13).
-# COALESCE 13..1 returns that last-filled slot's date (slot 1 always exists).
-_PROCESS_DATE = "COALESCE(\n            " + ",\n            ".join(
-    f"_process_date{i}" for i in range(13, 0, -1)
-) + "\n        )"
-
 
 def duckdb_delete(
     duckdb_conn_id="duckdb-conn",
@@ -136,6 +129,7 @@ def export_result(
                 MORTGAGE_NO,
                 obs_start,
                 MAX(window_end_dt) AS window_end_dt,
+                MAX(process_date) AS last_process_date,
                 {_SLOT_STATUS},
                 {_SLOT_PROCESS_DATE},
                 {_SLOT_CURRENT_BAL}
@@ -163,7 +157,7 @@ def export_result(
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
         {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS MTH_TM_ID,
         MORTGAGE_NO,
-        {_PROCESS_DATE} AS PROCESS_DATE,
+        last_process_date AS PROCESS_DATE,
         window_end_dt AS WINDOW_END_DT,
         _status1 AS STATUS1,
         default_date AS DEFAULT_DATE,

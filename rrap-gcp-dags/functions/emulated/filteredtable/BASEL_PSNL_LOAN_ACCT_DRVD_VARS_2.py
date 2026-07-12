@@ -1,11 +1,3 @@
-"""
-Rewrite of J_RRAP_TL10_2104_BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2.sas only.
-
-Builds emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 in a single DuckDB pipeline
-(SPL PIT v2, exclusions, treatment, OS_BAL_AMT_V2) for the current process month.
-
-PIT_STATUS_V2 = features.PIT_STATUS_CROSS_DEFAULT_ORIG (SRC_SYS_CD = 'SPL').
-"""
 
 UPSTREAM_ASSET = [
     "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
@@ -261,28 +253,33 @@ def duckdb_load(
             FROM hist_joined
         ),
         int_at_default AS (
+            -- SAS spl_default_beg_int: accrued interest at the ONSET (CUR->DEF) of
+            -- a default spell; fallback to the earliest record if already DEF.
             SELECT
                 LOAN_NUM,
                 CAB,
-                CASE
-                    WHEN TRIM(LAG_PIT) = 'DEF' AND TRIM(PIT_STATUS) = 'CUR'
-                    THEN LAG_ACCR_INTR
-                    WHEN TM_LVL_END_DT = EARLIEST_DT
-                         AND UPPER(TRIM(PIT_STATUS)) = 'DEF'
-                    THEN ACCR_INTR
-                END AS INT_AT_DEFAULT
+                TM_LVL_END_DT,
+                ACCR_INTR AS INT_AT_DEFAULT
             FROM ranked_hist
             WHERE (
-                TRIM(LAG_PIT) = 'DEF' AND TRIM(PIT_STATUS) = 'CUR'
+                UPPER(TRIM(LAG_PIT)) = 'CUR' AND UPPER(TRIM(PIT_STATUS)) = 'DEF'
             ) OR (
                 TM_LVL_END_DT = EARLIEST_DT AND UPPER(TRIM(PIT_STATUS)) = 'DEF'
             )
         ),
         int_at_default_recent AS (
-            SELECT LOAN_NUM, CAB, MAX(INT_AT_DEFAULT) AS INT_AT_DEFAULT
-            FROM int_at_default
-            WHERE INT_AT_DEFAULT IS NOT NULL
-            GROUP BY LOAN_NUM, CAB
+            -- SAS scans newest-first and stops at the first onset -> most-recent spell.
+            SELECT LOAN_NUM, CAB, INT_AT_DEFAULT
+            FROM (
+                SELECT
+                    LOAN_NUM,
+                    CAB,
+                    INT_AT_DEFAULT,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY LOAN_NUM, CAB ORDER BY TM_LVL_END_DT DESC
+                    ) AS rn
+                FROM int_at_default
+            ) WHERE rn = 1
         ),
         with_os_bal_v2 AS (
             SELECT
