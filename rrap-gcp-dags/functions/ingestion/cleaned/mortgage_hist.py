@@ -1,14 +1,3 @@
-"""
-Rewrite of RRAP_MOR_ACCT_01_LOAD_MORTGAGE_G.sas (core transform + bulk ind).
-
-Builds ingestion.MORTGAGE_HIST incrementally: one slice per process month from
-ingestion.AIRB_MORT_MTH_SNAPSHOT, with gen_lkp joins and prepay/province
-fill-forward from prior stacked history.
-
-SAS partition/gather/unload orchestration is replaced by delete+insert on
-PROCESS_DATE. Amort backfill for 200904 / 201001 / 201004 / 201007 is deferred
-(phase 2); raw AIRB amort is loaded as-is.
-"""
 
 UPSTREAM_ASSET = [
     "ingestion.AIRB_MORT_MTH_SNAPSHOT",

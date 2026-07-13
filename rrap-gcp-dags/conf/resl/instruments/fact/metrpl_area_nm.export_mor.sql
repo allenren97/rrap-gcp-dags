@@ -13,46 +13,60 @@ WITH snapshot_c AS (
         CAST(PROPERTY_ADDR_1 AS VARCHAR(112)) AS PROPERTY_ADDR_1,
         CAST(PROPERTY_ADDR_2 AS VARCHAR(112)) AS PROPERTY_ADDR_2,
         CAST(PROPERTY_ADDR_3 AS VARCHAR(112)) AS PROPERTY_ADDR_3,
-        prov.PROVINCE_CD as PROV,
+
+        COALESCE(prov.PROVINCE_CD, UPPER(TRIM(regexp_extract(PROPERTY_ADDR_3, '([^ ]+)$', 1)))) AS PROV,
+        
         trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PROPERTY_ADDR_1, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                regexp_replace(
+                        translate(lower(PROPERTY_ADDR_1),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
                 'g'
                 )
-            ) AS PROPERTY_ADDR_11,
-        trim(
+        ) AS PROPERTY_ADDR_11,
+        trim(   
                 regexp_replace(
-                translate(
-                    lower(coalesce(PROPERTY_ADDR_2, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                regexp_replace(
+                        translate(lower(PROPERTY_ADDR_2),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
                 'g'
                 )
-            ) AS PROPERTY_ADDR_22,
+        ) AS PROPERTY_ADDR_22,
         trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PROPERTY_ADDR_3, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                regexp_replace(
+                        translate(lower(PROPERTY_ADDR_3),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
                 'g'
                 )
-            ) AS PROPERTY_ADDR_33
+        ) AS PROPERTY_ADDR_33
     FROM {{upstream_asset[1]}}
-    left join {{upstream_asset[4]}} prov
-    ON prov.PROVINCE_ID = prop_prov
+    LEFT JOIN {{upstream_asset[4]}} prov
+    ON prop_prov = PROVINCE_ID
     WHERE TM_ID = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}
 ),
 filtered AS (
@@ -89,16 +103,20 @@ PRPTY_LOCTN_NM2 AS (
                 *,
                 trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PRPTY_LOCTN_NM, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                regexp_replace(
+                        translate(lower(PRPTY_LOCTN_NM),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
                 'g'
                 )
-                ) AS PRPTY_LOCTN_NM2
+        ) AS PRPTY_LOCTN_NM2
         FROM dedup
 ),
 substrings AS (
@@ -132,14 +150,13 @@ candidates AS (
         t.prpty_loctn_nm2,
         t.sort,
         CASE
-            WHEN instr(' ' || lower(coalesce(s.PROPERTY_ADDR_33, '')) || ' ',
-                       ' ' || lower(t.prpty_loctn_nm2) || ' ') > 0 THEN 1
-            WHEN instr(' ' || lower(coalesce(s.PROPERTY_ADDR_22, '')) || ' ',
-                       ' ' || lower(t.prpty_loctn_nm2) || ' ') > 0 THEN 2
-            WHEN instr(' ' || lower(coalesce(s.PROPERTY_ADDR_11, '')) || ' ',
-                       ' ' || lower(t.prpty_loctn_nm2) || ' ') > 0 THEN 3
-            WHEN instr(lower(coalesce(s.PROPERTY_ADDR_33, '')),
-                       lower(t.prpty_loctn_nm2)) > 0 THEN 4
+            WHEN instr(' ' || s.PROPERTY_ADDR_33 || ' ',
+                       ' ' || t.prpty_loctn_nm2 || ' ') > 0 THEN 1
+            WHEN instr(' ' || s.PROPERTY_ADDR_22 || ' ',
+                       ' ' || t.prpty_loctn_nm2 || ' ') > 0 THEN 2
+            WHEN instr(' ' || s.PROPERTY_ADDR_11 || ' ',
+                       ' ' || t.prpty_loctn_nm2 || ' ') > 0 THEN 3
+            WHEN instr(s.PROPERTY_ADDR_33, t.prpty_loctn_nm2) > 0 THEN 4
             ELSE 99
         END AS match_rank
     FROM snapshot_c s
@@ -154,7 +171,7 @@ best_match AS (
         prpty_loctn_nm,
         row_number() OVER (
             PARTITION BY MORT_NUM
-            ORDER BY match_rank, sort, length(prpty_loctn_nm2) DESC, prpty_loctn_nm2, cma
+            ORDER BY match_rank, sort, prpty_loctn_nm2
         ) AS rn
     FROM candidates
     WHERE match_rank < 99
@@ -162,9 +179,12 @@ best_match AS (
 SELECT
     b.basel_acct_id,
     '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate")}}' as OBSN_DT,
-    prov.prov,
     d.stream,
+    prov.prov as PROV,
     'MOR' AS SRC_SYS_CD,
+    b.MORT_NUM,
+    prpty_loctn_nm,
+    PROPERTY_ADDR_11, PROPERTY_ADDR_22, PROPERTY_ADDR_33,
     coalesce(m.cma, '11') as cma,
     CASE
         WHEN d.DLGD_F = 'N' THEN NULL
@@ -178,5 +198,5 @@ LEFT JOIN {{upstream_asset[2]}} d
     ON b.BASEL_ACCT_ID = d.BASEL_ACCT_ID
         AND d.OBSN_DT = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
         AND d.stream = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}'
-LEFT JOIN (SELECT DISTINCT MORT_NUM, prov FROM snapshot_c) prov ON prov.MORT_NUM = b.MORT_NUM
+LEFT JOIN (SELECT DISTINCT MORT_NUM, prov, PROPERTY_ADDR_11, PROPERTY_ADDR_22, PROPERTY_ADDR_33 FROM snapshot_c) prov ON prov.MORT_NUM = b.MORT_NUM
 WHERE b.mth_tm_id = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}

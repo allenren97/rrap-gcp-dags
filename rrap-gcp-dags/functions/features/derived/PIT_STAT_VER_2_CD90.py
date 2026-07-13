@@ -1,8 +1,3 @@
-"""
-PIT_STAT_VER_2_CD90 — SAS OLD_PIT_STAT_VER_2_CD from J_RRII_KS10_2103 (BNS_DLQNT_DAY < 120).
-
-Requires current-month snapshot + prior-month snapshot (MTH_TM_ID - 40).
-"""
 
 UPSTREAM_ASSET = [
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",

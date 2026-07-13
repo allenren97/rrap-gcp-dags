@@ -10,7 +10,8 @@ UPSTREAM_ASSET = ["ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
                   "ingestion.TNG_ACCT_MO",
                   "ingestion.BASEL_ACCT_DIM",
                   "instruments.CONS_DFT_MTH_CNT",
-                  "instruments.LGD_BASEL_SEG_NUM"]
+                  "instruments.LGD_BASEL_SEG_NUM",
+                  "ingestion.AIRB_MORT_MTH_SNAPSHOT"]
 
 DOWNSTREAM_ASSET = "instruments.INTR_ACCR_AMT"
 

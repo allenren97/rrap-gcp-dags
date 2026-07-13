@@ -10272,11 +10272,13 @@ def source_ingestion():
     mbr_src_curr = mbr_src_curr()
 
     sq083_start >> sq083 >> mbr_src_curr
+
+    
     @task
     def sq084_start():
         """ Manual approval task to start sq084 """
         raise AirflowException("Please mark this task successful to start sequence sq084.")
-
+    
 
     @task_group(group_id="sq084")
     def sq084_group():
@@ -10312,6 +10314,7 @@ def source_ingestion():
                 strings_can_be_null=True,
                 tmpfileloc="/bns/rrap/data/tmp",
                 target="cbs_mdm_flags.parquet",
+                schema=None,
             )
             def get_cbs_mdm_flags():
                 """Extract crz_cust_scorecard.cbs_mdm_flags for month-end."""
@@ -10333,7 +10336,7 @@ def source_ingestion():
                 sql="""
                     DELETE FROM emulated.CBS_MDM_FLAGS
                     WHERE EFF_DT = DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="MTH_END_DT") }}'
-                      AND STREAM = 'CBS'
+                      AND STREAM = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}'
                 """,
             )
             def delete_cbs_mdm_flags():

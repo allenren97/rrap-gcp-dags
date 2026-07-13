@@ -1,8 +1,3 @@
-"""
-Rewrite of J_RRII_KS10_2105_BASEL_PSNL_LOAN_ACCT_DRVD_VARS.sas only.
-
-Builds emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS in a single DuckDB pipeline.
-"""
 
 UPSTREAM_ASSET = [
     "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",

@@ -11,7 +11,7 @@ from airflow.sdk import task
     """,
 )
 def delete_cbs_mdm_flags():
-    """Clear the (EFF_DT, STREAM) partition before reload (idempotent re-runs)."""
+    """Clear the (EFF_DT, STREAM) partition before reload."""
     pass
 
 
@@ -21,7 +21,7 @@ def delete_cbs_mdm_flags():
     sql="""
         INSERT INTO emulated.CBS_MDM_FLAGS BY NAME
         SELECT
-            * EXCLUDE (op_field),
+            *,
             'CBS' AS STREAM,
             {{ task_instance.xcom_pull(task_ids="handle_month_context", key="MTH_TM_ID") }} AS MTH_TM_ID,
             CURRENT_TIMESTAMP AS UPDT_PROCESS_TMSTMP
@@ -31,9 +31,6 @@ def delete_cbs_mdm_flags():
 def load_cbs_mdm_flags():
     """
     Load extracted MDM flags into emulated.CBS_MDM_FLAGS.
-    Bare SELECT * from the parquet, minus op_field, plus the target-only columns
-    STREAM / MTH_TM_ID / UPDT_PROCESS_TMSTMP. All other Hive columns map by name
-    (eff_dt->EFF_DT, bnkrptcy_flag->BNKRPTCY_FLAG, etc.).
     """
     pass
 

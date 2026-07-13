@@ -13,7 +13,8 @@ UPSTREAM_ASSET = [
     ]
 DOWNSTREAM_ASSET = "instruments.WEIGHT_SECURED"
 DEPENDENCIES = {
-    'duckdb_clear': ['duckdb_load'],
+    'duckdb_clear': ['export_result'],
+    'export_result':['duckdb_load']
 }
 
 
@@ -24,11 +25,16 @@ def duckdb_clear(
     DELETE FROM { DOWNSTREAM_ASSET } 
     WHERE OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
     AND STREAM =  '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
-    
     """
 ):
     pass
 
+def export_result(
+    duckdb_conn_id="duckdb-conn",
+    config_file="weight_secured.export_result.sql",
+    config_type="instrument",
+):
+    pass
 
 
 def duckdb_load(
@@ -36,38 +42,13 @@ def duckdb_load(
     sql=f"""
     INSERT INTO {DOWNSTREAM_ASSET} BY NAME
     FROM (
-            with base as (
-                select a.basel_acct_id, EXPOSURE_SECURED,EXPOSURE_SECURED_MAXIMUM  
-                from 
-                ( 
-                    select basel_acct_id, EXPOSURE_SECURED from {UPSTREAM_ASSET[0]} 
-                    where obsn_dt='{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' 
-                    and stream = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
-                ) a 
-                inner join 
-                ( 
-                    select basel_acct_id, EXPOSURE_SECURED_MAXIMUM from {UPSTREAM_ASSET[1]} 
-                    where obsn_dt='{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-                    and stream = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
-                ) b
-                on a.basel_acct_id=b.basel_acct_id
-            ),final as (
-                select
-                basel_acct_id,
-                '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' as OBSN_DT,
-                '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' as STREAM,
-                (EXPOSURE_SECURED/EXPOSURE_SECURED_MAXIMUM) as WEIGHT_SECURED
-                from base   
-            )
-                select 
-                basel_acct_id,
-                obsn_dt,
-                stream,
-                case 
-                    when isnan(WEIGHT_SECURED)then NULL
-                    else WEIGHT_SECURED end
-                as WEIGHT_SECURED
-                from final    
+          SELECT 
+            OBSN_DT, 
+            BASEL_ACCT_ID,
+            WEIGHT_SECURED,
+            STREAM 
+            FROM 
+            read_parquet('{{{{ task_instance.xcom_pull(task_ids="fact__weight_secured.export_result", key="parquet") }}}}')      
         )
     """   
 ):

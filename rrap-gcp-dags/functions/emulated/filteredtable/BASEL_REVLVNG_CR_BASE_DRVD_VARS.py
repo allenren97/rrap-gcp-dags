@@ -1,35 +1,33 @@
-"""
-Rewrite of J_RRII_KS10_2103_BASEL_REVLVNG_CR_BASE_DRVD_VARS.sas only.
-
-Builds emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS:
-  export_result — compute full result set to parquet
-  duckdb_load   — insert parquet into DuckLake
-
-PIT_STAT_VER_2_CD = features.PIT_STATUS_CROSS_DEFAULT_ORIG.
-PIT_STAT_VER_2_CD90 / CD180 from features.PIT_STAT_VER_2_CD90 / CD180.
-Other derived columns (exposure, exclusions, thresholds) remain inline.
-"""
 
 UPSTREAM_ASSET = [
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
-    "ingestion.TM_DIM",
+    "features.BASEL_PRD_CD",
     "features.PIT_STAT_VER_2_CD90",
     "features.PIT_STAT_VER_2_CD180",
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
-    "reference.BLOCK_RECL_LKP",
-    "reference.BLOCK_RECL_CLS_RSN_LKP",
-    "reference.CHRG_OFF_LKP",
-    "reference.SRC_PRD_LKP",
-    "reference.SRC_PRD_STDNT_LOAN_LKP",
-    "reference.TRNST_EXCLSN_LKP",
-    "reference.RPTG_PRD_LKP_THRSHLD",
+    "features.REVISED_EXPSR_AMT",
+    "features.SML_BUS_F",
+    "features.TRNST_EXCLSN_F",
+    "features.RS_F",
+    "features.ACCRL_STAT_F",
+    "features.LTV_TP_CD",
+    "features.BNKRPY_F",
+    "features.CONSM_PRD_TREATMNT_CD",
+    "features.HELOC_F",
+    "features.STEP_CD",
+    "features.CONSM_SCORECRD_EXCLSN_F",
+    "features.TOTAL_EXPSR_ABOVE_LMT_F",
 ]
 
-DOWNSTREAM_ASSET = "emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS"
+DOWNSTREAM_ASSET = "emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS_FEATURE_GENERATED"
 
-_TASK_GROUP = "filteredtable__BASEL_REVLVNG_CR_BASE_DRVD_VARS"
+_TASK_GROUP = "filteredtable__BASEL_REVLVNG_CR_BASE_DRVD_VARS_FEATURE_GENERATED"
 
 _RUNDATE = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
+_STREAM = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}'
+_MTH_TM_ID = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}'
+
+_TASK_GROUP = "filteredtable__BASEL_REVLVNG_CR_BASE_DRVD_VARS"
 
 DEPENDENCIES = {
     "duckdb_delete": ["export_result"],
@@ -41,8 +39,8 @@ def duckdb_delete(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
     DELETE FROM {DOWNSTREAM_ASSET}
-    WHERE OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-      AND STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
+    WHERE OBSN_DT = '{_RUNDATE}'
+      AND STREAM = '{_STREAM}'
     """,
 ):
     pass
@@ -51,395 +49,94 @@ def duckdb_delete(
 def export_result(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
-    WITH
-        ymt AS (
-            SELECT STRFTIME(TM_LVL_END_DT, '%Y%m') AS yrmth
-            FROM ingestion.TM_DIM
-            WHERE TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
-        ),
-        lk_bf AS (
-            SELECT BNKRPY_F, BLOCK_RECL_CD
-            FROM (
-                SELECT
-                    TRIM(BNKRPY_F) AS BNKRPY_F,
-                    TRIM(BLOCK_RECL_CD) AS BLOCK_RECL_CD
-                FROM reference.BLOCK_RECL_LKP, ymt
-                WHERE ymt.yrmth BETWEEN EFF_FROM_YR_MTH AND EFF_TO_YR_MTH
-            )
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY BLOCK_RECL_CD ORDER BY BNKRPY_F) = 1
-        ),
-        lk_asf AS (
-            SELECT ACCRL_STAT_F, CHRG_OFF_CD
-            FROM (
-                SELECT
-                    TRIM(ACCRL_STAT_F) AS ACCRL_STAT_F,
-                    TRIM(CHRG_OFF_CD) AS CHRG_OFF_CD
-                FROM reference.CHRG_OFF_LKP, ymt
-                WHERE ymt.yrmth BETWEEN EFF_FROM_YR_MTH AND EFF_TO_YR_MTH
-                  AND TRIM(CHRG_OFF_STAT_F) = 'Y'
-                  AND TRIM(CHRG_OFF_CD) IN (
-                      SELECT TRIM(CHRG_OFF_CD)
-                      FROM reference.CHRG_OFF_LKP, ymt y2
-                      WHERE TRIM(ACCRL_STAT_F) IN ('N', 'Q')
-                        AND y2.yrmth BETWEEN EFF_FROM_YR_MTH AND EFF_TO_YR_MTH
-                  )
-            )
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY CHRG_OFF_CD ORDER BY ACCRL_STAT_F) = 1
-        ),
-        lk_sp AS (
-            SELECT
-                BASEL_PRD_CD,
-                BASEL_PRD_DESC,
-                LTV_TP_CD,
-                SML_BUS_F,
-                CONSM_SCORECRD_EXCLSN_F,
-                CONSM_PRD_TREATMNT_CD,
-                SRC_PRD_CD,
-                SRC_SUB_PRD_CD
-            FROM (
-                SELECT
-                    TRIM(BASEL_PRD_CD) AS BASEL_PRD_CD,
-                    TRIM(BASEL_PRD_DESC) AS BASEL_PRD_DESC,
-                    TRIM(LTV_TP_CD) AS LTV_TP_CD,
-                    TRIM(SML_BUS_F) AS SML_BUS_F,
-                    TRIM(CONSM_SCORECRD_EXCLSN_F) AS CONSM_SCORECRD_EXCLSN_F,
-                    TRIM(CONSM_PRD_TREATMNT_CD) AS CONSM_PRD_TREATMNT_CD,
-                    TRIM(SRC_PRD_CD) AS SRC_PRD_CD,
-                    TRIM(SRC_SUB_PRD_CD) AS SRC_SUB_PRD_CD
-                FROM reference.SRC_PRD_LKP, ymt
-                WHERE TRIM(PRD_SYS_CD) = 'KS'
-                  AND ymt.yrmth BETWEEN EFF_FROM_YR_MTH AND EFF_TO_YR_MTH
-            )
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY SRC_PRD_CD, SRC_SUB_PRD_CD ORDER BY BASEL_PRD_CD
-            ) = 1
-        ),
-        lk_std AS (
-            SELECT
-                BASEL_PRD_CD,
-                BASEL_PRD_DESC,
-                SRC_PRD_CD,
-                SRC_SUB_PRD_CD,
-                BILL_CD_CHAR
-            FROM (
-                SELECT
-                    TRIM(BASEL_PRD_CD) AS BASEL_PRD_CD,
-                    TRIM(BASEL_PRD_DESC) AS BASEL_PRD_DESC,
-                    TRIM(SRC_PRD_CD) AS SRC_PRD_CD,
-                    TRIM(SRC_SUB_PRD_CD) AS SRC_SUB_PRD_CD,
-                    TRIM(BILL_CD_CHAR) AS BILL_CD_CHAR
-                FROM reference.SRC_PRD_STDNT_LOAN_LKP, ymt
-                WHERE ymt.yrmth BETWEEN EFF_FROM_YR_MTH AND EFF_TO_YR_MTH
-                  AND TRIM(PRD_SYS_CD) = 'KS'
-            )
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY SRC_PRD_CD, SRC_SUB_PRD_CD, BILL_CD_CHAR ORDER BY BASEL_PRD_CD
-            ) = 1
-        ),
-        lk_cc1 AS (
-            SELECT CSEF_CONDITION_1, BLOCK_RECL_CD
-            FROM (
-                SELECT
-                    TRIM(CONSM_SCORECRD_EXCLSN_F) AS CSEF_CONDITION_1,
-                    TRIM(BLOCK_RECL_CD) AS BLOCK_RECL_CD
-                FROM reference.BLOCK_RECL_LKP, ymt
-                WHERE ymt.yrmth BETWEEN EFF_FROM_YR_MTH AND EFF_TO_YR_MTH
-                  AND TRIM(BLOCK_RECL_CD) <> ''
-            )
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY BLOCK_RECL_CD ORDER BY CSEF_CONDITION_1
-            ) = 1
-        ),
-        lk_cc2 AS (
-            SELECT CSEF_CONDITION_2, CLS_RSN_CD, BLOCK_RECL_CD
-            FROM (
-                SELECT
-                    TRIM(CONSM_SCORECRD_EXCLSN_F) AS CSEF_CONDITION_2,
-                    TRIM(CLS_RSN_CD) AS CLS_RSN_CD,
-                    TRIM(BLOCK_RECL_CD) AS BLOCK_RECL_CD
-                FROM reference.BLOCK_RECL_CLS_RSN_LKP, ymt
-                WHERE ymt.yrmth BETWEEN EFF_FROM_YR_MTH AND EFF_TO_YR_MTH
-                  AND (TRIM(CLS_RSN_CD) <> '' OR TRIM(BLOCK_RECL_CD) <> '')
-            )
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY BLOCK_RECL_CD, CLS_RSN_CD ORDER BY CSEF_CONDITION_2
-            ) = 1
-        ),
-        snap AS (
-            SELECT
-                a.MTH_TM_ID,
-                a.BASEL_ACCT_ID,
-                a.PRIM_BASEL_CUST_ID,
-                a.PRIM_BASEL_CUST_ID AS BASEL_CUST_ID,
-                a.STEP_PLN_SNAPSHOT_ID,
-                a.ACCT_NUM,
-                TRIM(a.PRD_CD) AS PRD_CD,
-                TRIM(a.SUB_PRD_CD) AS SUB_PRD_CD,
-                TRIM(a.BLOCK_RECL_CD) AS BLOCK_RECL_CD,
-                a.TOT_NEW_BAL_AMT,
-                a.CR_LMT_AMT,
-                TRIM(a.ACCT_CLS_RSN_CD) AS ACCT_CLS_RSN_CD,
-                TRIM(a.CHRG_OFF_CD) AS CHRG_OFF_CD,
-                a.BNS_DLQNT_DAY,
-                a.TOT_UNPAID_FNCL_CHRG_AMT,
-                TRIM(a.CRNT_BILL_CD) AS CRNT_BILL_CD,
-                TRIM(a.SCRD_TP_CD) AS SCRD_TP_CD,
-                a.SWITCH_XREF,
-                a.SCRTY_TP_CD,
-                a.TRNST_NUM,
-                c.EXCLUDED_TRNST_NUM,
-                SUBSTR(TRIM(a.CRNT_BILL_CD), 1, 1) AS BILL_CD_CHAR_1,
-                SUBSTR(TRIM(a.CRNT_BILL_CD), 1, 2) AS BILL_CD_CHAR_2,
-                SUBSTR(TRIM(a.CRNT_BILL_CD), 3, 1) AS BILL_CD_CHAR1,
-                CASE
-                    WHEN a.SUB_PRD_CD = 'RS'
-                      OR a.STEP_PLN_SNAPSHOT_ID NOT IN (-1, -2)
-                    THEN 'Y'
-                    ELSE 'N'
-                END AS HELOC_F,
-                CASE
-                    WHEN a.CR_LMT_AMT > a.TOT_NEW_BAL_AMT THEN a.CR_LMT_AMT
-                    ELSE a.TOT_NEW_BAL_AMT
-                END AS REVISED_EXPSR_AMT
-            FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT a
-            LEFT JOIN reference.TRNST_EXCLSN_LKP c
-                ON a.TRNST_NUM = c.EXCLUDED_TRNST_NUM
-            WHERE a.MTH_TM_ID =
-                {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
-        ),
-        snap_cd AS (
-            SELECT
-                a.MTH_TM_ID,
-                a.BASEL_ACCT_ID,
-                a.BASEL_CUST_ID,
-                a.PRIM_BASEL_CUST_ID,
-                a.STEP_PLN_SNAPSHOT_ID,
-                a.ACCT_NUM,
-                a.PRD_CD,
-                a.SUB_PRD_CD,
-                a.BLOCK_RECL_CD,
-                a.TOT_NEW_BAL_AMT,
-                a.CR_LMT_AMT,
-                a.ACCT_CLS_RSN_CD,
-                a.CHRG_OFF_CD,
-                a.BNS_DLQNT_DAY,
-                a.TOT_UNPAID_FNCL_CHRG_AMT,
-                a.CRNT_BILL_CD,
-                a.SCRD_TP_CD,
-                a.SWITCH_XREF,
-                a.SCRTY_TP_CD,
-                a.TRNST_NUM,
-                a.EXCLUDED_TRNST_NUM,
-                a.HELOC_F,
-                a.BILL_CD_CHAR_1,
-                a.BILL_CD_CHAR_2,
-                a.REVISED_EXPSR_AMT,
-                pit90.PIT_STAT_VER_2_CD90,
-                pit180.PIT_STAT_VER_2_CD180,
-                pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS PIT_STAT_VER_2_CD,
-                bf.BNKRPY_F,
-                sp.CONSM_SCORECRD_EXCLSN_F AS CONSM_SCORECRD_EXCLSN_F3,
-                cc1.CSEF_CONDITION_1,
-                cc2.CSEF_CONDITION_2,
-                asf.ACCRL_STAT_F,
-                CASE
-                    WHEN sp.SRC_PRD_CD = 'SSL' THEN std.BASEL_PRD_DESC
-                    ELSE sp.BASEL_PRD_DESC
-                END AS BASEL_PRD_DESC,
-                sp.LTV_TP_CD,
-                sp.SML_BUS_F,
-                sp.CONSM_PRD_TREATMNT_CD AS CONSM_PRD_TREATMNT_CD_LKP,
-                CASE
-                    WHEN sp.SRC_PRD_CD = 'SSL' THEN std.BASEL_PRD_CD
-                    ELSE sp.BASEL_PRD_CD
-                END AS BASEL_PRD_CD,
-                sp.SRC_SUB_PRD_CD,
-                a.BILL_CD_CHAR1,
-                std.BILL_CD_CHAR
-            FROM snap a
-            LEFT JOIN features.PIT_STAT_VER_2_CD90 pit90
-                ON a.BASEL_ACCT_ID = pit90.BASEL_ACCT_ID
-               AND pit90.OBSN_DT = '{_RUNDATE}'
-            LEFT JOIN features.PIT_STAT_VER_2_CD180 pit180
-                ON a.BASEL_ACCT_ID = pit180.BASEL_ACCT_ID
-               AND pit180.OBSN_DT = '{_RUNDATE}'
-            LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
-                ON a.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
-               AND pit.OBSN_DT = '{_RUNDATE}'
-               AND pit.SRC_SYS_CD = 'KS'
-            LEFT JOIN lk_bf bf
-                ON a.BLOCK_RECL_CD = bf.BLOCK_RECL_CD
-            LEFT JOIN lk_asf asf
-                ON a.CHRG_OFF_CD = asf.CHRG_OFF_CD
-            LEFT JOIN lk_sp sp
-                ON a.PRD_CD = sp.SRC_PRD_CD
-               AND a.SUB_PRD_CD = sp.SRC_SUB_PRD_CD
-            LEFT JOIN lk_std std
-                ON a.PRD_CD = std.SRC_PRD_CD
-               AND a.SUB_PRD_CD = std.SRC_SUB_PRD_CD
-               AND a.BILL_CD_CHAR1 = std.BILL_CD_CHAR
-            LEFT JOIN lk_cc1 cc1
-                ON a.BLOCK_RECL_CD = cc1.BLOCK_RECL_CD
-            LEFT JOIN lk_cc2 cc2
-                ON a.BLOCK_RECL_CD = cc2.BLOCK_RECL_CD
-               AND a.ACCT_CLS_RSN_CD = cc2.CLS_RSN_CD
-        ),
-        derived AS (
-            SELECT
-                *,
-                CASE
-                    WHEN COALESCE(EXCLUDED_TRNST_NUM, '') = '' THEN 'N'
-                    ELSE 'Y'
-                END AS TRNST_EXCLSN_F,
-                CASE
-                    WHEN STEP_PLN_SNAPSHOT_ID NOT IN (-1, -2) THEN 'Y'
-                    WHEN STEP_PLN_SNAPSHOT_ID IN (-1, -2) AND PRD_CD IN ('SCL', 'VIC') THEN
-                        CASE
-                            WHEN SCRD_TP_CD = 'U' THEN 'U'
-                            WHEN BILL_CD_CHAR_1 = 'U' THEN 'U'
-                            WHEN BILL_CD_CHAR_2 IN ('11', 'SB', 'SN', 'SP', 'SR', 'ST') THEN 'R'
-                            ELSE 'O'
-                        END
-                    WHEN STEP_PLN_SNAPSHOT_ID IN (-1, -2) AND PRD_CD NOT IN ('SCL', 'VIC') THEN 'N'
-                END AS STEP_CD,
-                CASE WHEN SUB_PRD_CD = 'RS' THEN 'Y' ELSE 'N' END AS RS_F,
-                CASE
-                    WHEN CSEF_CONDITION_1 = 'Y' THEN 'Y'
-                    WHEN CSEF_CONDITION_2 = 'Y' THEN 'Y'
-                    WHEN CONSM_SCORECRD_EXCLSN_F3 = 'Y' THEN 'Y'
-                    WHEN TOT_NEW_BAL_AMT <= 0 AND CR_LMT_AMT <= 0 THEN 'Y'
-                    WHEN TOT_NEW_BAL_AMT <= 0
-                         AND (SUBSTR(BLOCK_RECL_CD, 1, 1) = 'V' OR BLOCK_RECL_CD = 'FX')
-                    THEN 'Y'
-                    WHEN (
-                        CASE
-                            WHEN BASEL_PRD_CD = 'CC' AND HELOC_F = 'N'
-                            THEN PIT_STAT_VER_2_CD180
-                            ELSE PIT_STAT_VER_2_CD90
-                        END
-                    ) = 'CHG'
-                    THEN 'Y'
-                    ELSE 'N'
-                END AS CONSM_SCORECRD_EXCLSN_F,
-                CASE
-                    WHEN CR_LMT_AMT <= 0 AND TOT_NEW_BAL_AMT <= 0 THEN 'Z'
-                    WHEN TOT_NEW_BAL_AMT <= 0
-                         AND (SUBSTR(BLOCK_RECL_CD, 1, 1) = 'V' OR BLOCK_RECL_CD = 'FX')
-                    THEN 'Z'
-                    ELSE CONSM_PRD_TREATMNT_CD_LKP
-                END AS CONSM_PRD_TREATMNT_CD_FINAL
-            FROM snap_cd
-        ),
-        derived_out AS (
-            SELECT
-                * EXCLUDE (CONSM_PRD_TREATMNT_CD_LKP, CONSM_PRD_TREATMNT_CD_FINAL),
-                CONSM_PRD_TREATMNT_CD_FINAL AS CONSM_PRD_TREATMNT_CD
-            FROM derived
-        ),
-        thrshld AS (
-            SELECT a.THRSHLD
-            FROM reference.RPTG_PRD_LKP_THRSHLD a
-            INNER JOIN ingestion.TM_DIM b
-                ON b.TM_LVL = 'Month'
-               AND b.TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
-               AND b.TM_LVL_END_DT BETWEEN a.EFF_FROM_YR_MTH AND a.EFF_TO_YR_MTH
-            LIMIT 1
-        ),
-        tot_expsr AS (
-            SELECT
-                BASEL_CUST_ID,
-                BASEL_PRD_CD,
-                SUM(REVISED_EXPSR_AMT) AS TOT_EXPSR
-            FROM derived_out
-            WHERE BASEL_CUST_ID > 0
-              AND CONSM_PRD_TREATMNT_CD = 'A'
-              AND HELOC_F = 'N'
-              AND PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-              AND SML_BUS_F = 'N'
-              AND TRNST_EXCLSN_F = 'N'
-              AND BASEL_PRD_CD IN ('CC', 'LOC', 'SL A')
-            GROUP BY BASEL_CUST_ID, BASEL_PRD_CD
-        ),
-        with_expsr_flag AS (
-            SELECT
-                a.*,
-                CASE
-                    WHEN a.CONSM_PRD_TREATMNT_CD = 'A'
-                         AND a.HELOC_F = 'N'
-                         AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-                         AND a.SML_BUS_F = 'N'
-                         AND a.TRNST_EXCLSN_F = 'N'
-                         AND te.TOT_EXPSR IS NULL
-                    THEN ''
-                    WHEN a.CONSM_PRD_TREATMNT_CD = 'A'
-                         AND a.HELOC_F = 'N'
-                         AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-                         AND a.SML_BUS_F = 'N'
-                         AND a.TRNST_EXCLSN_F = 'N'
-                         AND te.TOT_EXPSR > (SELECT THRSHLD FROM thrshld)
-                    THEN 'Y'
-                    WHEN a.CONSM_PRD_TREATMNT_CD = 'A'
-                         AND a.HELOC_F = 'N'
-                         AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-                         AND a.SML_BUS_F = 'N'
-                         AND a.TRNST_EXCLSN_F = 'N'
-                    THEN 'N'
-                    ELSE NULL
-                END AS TOTAL_EXPSR_ABOVE_LMT_F_BASE
-            FROM derived_out a
-            LEFT JOIN tot_expsr te
-                ON a.BASEL_CUST_ID = te.BASEL_CUST_ID
-               AND a.BASEL_PRD_CD = te.BASEL_PRD_CD
-               AND a.CONSM_PRD_TREATMNT_CD = 'A'
-               AND a.HELOC_F = 'N'
-               AND a.PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-               AND a.SML_BUS_F = 'N'
-               AND a.TRNST_EXCLSN_F = 'N'
-        )
     SELECT
-        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
-        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
-        MTH_TM_ID,
-        BASEL_ACCT_ID,
-        BASEL_CUST_ID,
-        ACCT_NUM,
-        BASEL_PRD_CD,
-        BASEL_PRD_DESC,
-        CONSM_SCORECRD_EXCLSN_F,
-        CONSM_PRD_TREATMNT_CD,
-        HELOC_F,
-        PIT_STAT_VER_2_CD,
-        REVISED_EXPSR_AMT,
-        RS_F,
-        SML_BUS_F,
-        STEP_CD,
-        TRNST_EXCLSN_F,
-        ACCRL_STAT_F,
-        LTV_TP_CD,
-        BNKRPY_F,
-        PIT_STAT_VER_2_CD90,
-        PIT_STAT_VER_2_CD180,
-        CASE
-            WHEN BASEL_CUST_ID = -1
-                 AND CONSM_PRD_TREATMNT_CD = 'A'
-                 AND HELOC_F = 'N'
-                 AND PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-                 AND SML_BUS_F = 'N'
-                 AND TRNST_EXCLSN_F = 'N'
-                 AND BASEL_PRD_CD IN ('CC', 'LOC', 'SL A')
-            THEN CASE
-                WHEN REVISED_EXPSR_AMT > (SELECT THRSHLD FROM thrshld) THEN 'Y'
-                ELSE 'N'
-            END
-            WHEN CONSM_PRD_TREATMNT_CD = 'A'
-                 AND (HELOC_F = 'Y' OR BASEL_PRD_CD IN ('SL', 'SL B'))
-                 AND PIT_STAT_VER_2_CD IN ('CUR', 'DEF')
-                 AND SML_BUS_F = 'N'
-                 AND TRNST_EXCLSN_F = 'N'
-            THEN 'N'
-            ELSE TOTAL_EXPSR_ABOVE_LMT_F_BASE
-        END AS TOTAL_EXPSR_ABOVE_LMT_F
-    FROM with_expsr_flag
+        '{_RUNDATE}' AS OBSN_DT,
+        '{_STREAM}' AS STREAM,
+        a.MTH_TM_ID,
+        a.BASEL_ACCT_ID,
+        a.PRIM_BASEL_CUST_ID AS BASEL_CUST_ID,
+        a.ACCT_NUM,
+        prd.BASEL_PRD_CD,
+        prd.BASEL_PRD_DESC,
+        csef.CONSM_SCORECRD_EXCLSN_F,
+        trt.CONSM_PRD_TREATMNT_CD,
+        heloc.HELOC_F,
+        pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS PIT_STAT_VER_2_CD,
+        expsr.REVISED_EXPSR_AMT,
+        rs.RS_F,
+        sml.SML_BUS_F,
+        step.STEP_CD,
+        trnst.TRNST_EXCLSN_F,
+        accrl.ACCRL_STAT_F,
+        ltv.LTV_TP_CD,
+        bnkrpy.BNKRPY_F,
+        pit90.PIT_STAT_VER_2_CD90,
+        pit180.PIT_STAT_VER_2_CD180,
+        teaf.TOTAL_EXPSR_ABOVE_LMT_F
+    FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT a
+    LEFT JOIN features.BASEL_PRD_CD prd
+        ON a.BASEL_ACCT_ID = prd.BASEL_ACCT_ID
+       AND prd.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.PIT_STAT_VER_2_CD90 pit90
+        ON a.BASEL_ACCT_ID = pit90.BASEL_ACCT_ID
+       AND pit90.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.PIT_STAT_VER_2_CD180 pit180
+        ON a.BASEL_ACCT_ID = pit180.BASEL_ACCT_ID
+       AND pit180.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+        ON a.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+       AND pit.OBSN_DT = '{_RUNDATE}'
+       AND pit.SRC_SYS_CD = 'KS'
+    LEFT JOIN features.REVISED_EXPSR_AMT expsr
+        ON a.BASEL_ACCT_ID = expsr.BASEL_ACCT_ID
+       AND expsr.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.SML_BUS_F sml
+        ON a.BASEL_ACCT_ID = sml.BASEL_ACCT_ID
+       AND sml.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.TRNST_EXCLSN_F trnst
+        ON a.BASEL_ACCT_ID = trnst.BASEL_ACCT_ID
+       AND trnst.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.RS_F rs
+        ON a.BASEL_ACCT_ID = rs.BASEL_ACCT_ID
+       AND rs.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.ACCRL_STAT_F accrl
+        ON a.BASEL_ACCT_ID = accrl.BASEL_ACCT_ID
+       AND accrl.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.LTV_TP_CD ltv
+        ON a.BASEL_ACCT_ID = ltv.BASEL_ACCT_ID
+       AND ltv.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.BNKRPY_F bnkrpy
+        ON a.BASEL_ACCT_ID = bnkrpy.BASEL_ACCT_ID
+       AND bnkrpy.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.CONSM_PRD_TREATMNT_CD trt
+        ON a.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
+       AND trt.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.HELOC_F heloc
+        ON a.BASEL_ACCT_ID = heloc.BASEL_ACCT_ID
+       AND heloc.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.STEP_CD step
+        ON a.BASEL_ACCT_ID = step.BASEL_ACCT_ID
+       AND step.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.CONSM_SCORECRD_EXCLSN_F csef
+        ON a.BASEL_ACCT_ID = csef.BASEL_ACCT_ID
+       AND csef.OBSN_DT = '{_RUNDATE}'
+    LEFT JOIN features.TOTAL_EXPSR_ABOVE_LMT_F teaf
+        ON a.BASEL_ACCT_ID = teaf.BASEL_ACCT_ID
+       AND teaf.OBSN_DT = '{_RUNDATE}'
+    WHERE a.MTH_TM_ID = {_MTH_TM_ID}
+    """,
+):
+    pass
+
+
+def export_result(
+    duckdb_conn_id="duckdb-conn",
+    sql=f"""
+    INSERT INTO {DOWNSTREAM_ASSET} BY NAME
+    SELECT *
+    FROM read_parquet(
+        '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_result", key="parquet") }}}}'
+    )
     """,
 ):
     pass

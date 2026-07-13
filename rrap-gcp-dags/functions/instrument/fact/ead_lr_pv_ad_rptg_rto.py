@@ -24,7 +24,6 @@ def duckdb_clear(
 
 
 def duckdb_load(
-    trigger_rule="none_failed_min_one_success",
     duckdb_conn_id="duckdb-conn",
     sql=f"""
     INSERT INTO {DOWNSTREAM_ASSET} BY NAME

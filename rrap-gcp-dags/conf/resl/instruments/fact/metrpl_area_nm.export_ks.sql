@@ -21,42 +21,54 @@ WITH snapshot_c AS (
         END AS PROV,
         trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PRPTY_DESC_1, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                        regexp_replace(
+                        translate(lower(PRPTY_DESC_1),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
-                'g'
+                        'g'
                 )
-            ) AS PRPTY_DESC_11,
+        ) AS PRPTY_DESC_11,
 
         trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PRPTY_DESC_2, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                        regexp_replace(
+                        translate(lower(PRPTY_DESC_2),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
-                'g'
+                        'g'
                 )
-            ) AS PRPTY_DESC_22,
+        ) AS PRPTY_DESC_22,
 
         trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PRPTY_DESC_3, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                        regexp_replace(
+                        translate(lower(PRPTY_DESC_3),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
-                'g'
+                        'g'
                 )
-            ) AS PRPTY_DESC_33
+        ) AS PRPTY_DESC_33
 
     FROM {{upstream_asset[1]}}
     WHERE MTH_TM_ID = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}
@@ -95,16 +107,20 @@ PRPTY_LOCTN_NM2 AS (
                 *,
                 trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PRPTY_LOCTN_NM, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                        regexp_replace(
+                        translate(lower(PRPTY_LOCTN_NM),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
-                'g'
+                        'g'
                 )
-                ) AS PRPTY_LOCTN_NM2
+        ) AS PRPTY_LOCTN_NM2
         FROM dedup
 ),
 substrings AS (
@@ -150,14 +166,13 @@ candidates AS (
         t.prpty_loctn_nm2,
         t.sort,
         CASE
-            WHEN instr(' ' || lower(coalesce(s.prpty_desc_33, '')) || ' ',
-                       ' ' || lower(t.prpty_loctn_nm2) || ' ') > 0 THEN 1
-            WHEN instr(' ' || lower(coalesce(s.prpty_desc_22, '')) || ' ',
-                       ' ' || lower(t.prpty_loctn_nm2) || ' ') > 0 THEN 2
-            WHEN instr(' ' || lower(coalesce(s.prpty_desc_11, '')) || ' ',
-                       ' ' || lower(t.prpty_loctn_nm2) || ' ') > 0 THEN 3
-            WHEN instr(lower(coalesce(s.prpty_desc_33, '')),
-                       lower(t.prpty_loctn_nm2)) > 0 THEN 4
+            WHEN instr(' ' || s.PRPTY_DESC_33 || ' ',
+                       ' ' || t.prpty_loctn_nm2 || ' ') > 0 THEN 1
+            WHEN instr(' ' || s.PRPTY_DESC_22 || ' ',
+                       ' ' || t.prpty_loctn_nm2 || ' ') > 0 THEN 2
+            WHEN instr(' ' || s.PRPTY_DESC_11 || ' ',
+                       ' ' || t.prpty_loctn_nm2 || ' ') > 0 THEN 3
+            WHEN instr(s.PRPTY_DESC_33, t.prpty_loctn_nm2) > 0 THEN 4
             ELSE 99
         END AS match_rank
     FROM snapshot_c s
@@ -168,19 +183,19 @@ best_match AS (
     SELECT
         STEP_PLN_AGRMNT_NUM,
         cma,
-        prov,
         prpty_loctn_nm,
+        prov,
         row_number() OVER (
             PARTITION BY STEP_PLN_AGRMNT_NUM
-            ORDER BY match_rank, sort, length(prpty_loctn_nm2) DESC, prpty_loctn_nm2, cma
+            ORDER BY match_rank, sort, prpty_loctn_nm2
         ) AS rn
     FROM candidates
     WHERE match_rank < 99
 )
 SELECT
     b.basel_acct_id,
-    '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate")}}' as OBSN_DT,
     prov.prov,
+    '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate")}}' as OBSN_DT,
     d.stream,
     'KS' AS SRC_SYS_CD,
     coalesce(upper(m.cma), '11') as cma,

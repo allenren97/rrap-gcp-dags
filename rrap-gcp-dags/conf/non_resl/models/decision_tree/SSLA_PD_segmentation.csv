@@ -1,0 +1,5 @@
+bin,Detail Score Name,OperatorLower,RangeLower,OperatorUpper,RangeUpper
+1,BNS_DLQNT_DAY,=,0,,
+2,BNS_DLQNT_DAY,>,0,,
+2,BNS_DLQNT_DAY,<,120,,
+3,BNS_DLQNT_DAY,>=,120,,

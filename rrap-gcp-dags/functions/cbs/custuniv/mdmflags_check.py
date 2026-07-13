@@ -38,25 +38,6 @@ _ALERT_BCC = [
 _ALERT_SUBJECT = "CBS_MDM_FLAGS not loaded Prior to Monthly Run"
 
 
-def _send_alert(rundate):
-    """Send the not-loaded alert; a mail failure must not prevent the abort."""
-    body = (
-        f"No data is available in CBS_MDM_FLAGS for the processing month ending {rundate}.<br>"
-        "Please check that this table is loaded prior to restarting this job and "
-        "proceeding with the schedule.<br>"
-        "The production job has now aborted."
-    )
-    try:
-        send_email(
-            to=_ALERT_TO,
-            subject=_ALERT_SUBJECT,
-            html_content=body,
-            bcc=_ALERT_BCC,
-        )
-    except Exception as exc:  # pragma: no cover - depends on SMTP availability
-        logger.error("MDMFLAGS_CHECK: alert email failed to send: %s", exc)
-
-
 def mdmflags_check(pool="duckdb_pool", pool_slots=1):
     """
     Fail the run if emulated.CBS_MDM_FLAGS has no rows for the process
@@ -81,7 +62,21 @@ def mdmflags_check(pool="duckdb_pool", pool_slots=1):
             "(stream=%s). Sending alert and aborting.",
             rundate, stream,
         )
-        _send_alert(rundate)
+        body = (
+            f"No data is available in CBS_MDM_FLAGS for the processing month ending {rundate}.<br>"
+            "Please check that this table is loaded prior to restarting this job and "
+            "proceeding with the schedule.<br>"
+            "The production job has now aborted."
+        )
+        try:
+            send_email(
+                to=_ALERT_TO,
+                subject=_ALERT_SUBJECT,
+                html_content=body,
+                bcc=_ALERT_BCC,
+            )
+        except Exception as exc:  # pragma: no cover - depends on SMTP availability
+            logger.error("MDMFLAGS_CHECK: alert email failed to send: %s", exc)
         raise AirflowException(
             f"MDMFLAGS_CHECK: emulated.CBS_MDM_FLAGS has 0 rows for "
             f"EFF_DT={rundate}, STREAM={stream} — aborting "

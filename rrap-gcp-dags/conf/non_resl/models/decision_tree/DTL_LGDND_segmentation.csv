@@ -1,0 +1,13 @@
+bin,Detail Score Name,OperatorLower,RangeLower,OperatorUpper,RangeUpper
+1,AT29_MAX6M,<=,4,,
+2,AT29_MAX6M,>,4,,
+1,IND_DELQ_SUM24M,IN,"( '1','2')",,
+2,IND_DELQ_SUM24M,IN,"( '3', '4', '5', '6', '7', '8')",,
+3,IND_DELQ_SUM24M,>,8,,
+1,IND_JOINT,=,0,,
+2,IND_JOINT,=,1,,
+1,PRD_ID,IN,"('S01', 'S02', 'S03', 'S04', 'S06')",,
+2,PRD_ID,=,S05,,
+3,PRD_ID,=,S07,,
+4,PRD_ID,=,S08,,
+

@@ -1,14 +1,3 @@
-"""
-Rewrite of J_RRII_KS10_0000_PIT_STATUS_PRE_STEP_CROSS_DFLT.sas
-
-Loads ingestion.PIT_STATUS_PRE_STEP for KS, SPL, and MOR and applies Step
-cross-default overrides consumed by J_RRII_KS10_2103_BASEL_REVLVNG_CR_BASE_DRVD_VARS.
-
-Export tasks (export_ks/spl/mor) materialize parquet; duckdb_load unions them
-into the target table. Names use export_* (not duckdb_export_*) so the DAG
-generator applies @task.export for parquet output.
-"""
-
 UPSTREAM_ASSET = [
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
     "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",

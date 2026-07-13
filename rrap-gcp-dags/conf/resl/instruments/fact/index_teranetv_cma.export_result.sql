@@ -49,11 +49,8 @@ snapshot_c AS (
         CASE
             WHEN MADE_DT IS NULL OR MADE_DT > PROCESS_DATE THEN DATE(airb.INTR_ADJ_DT)
 			ELSE DATE(MADE_DT)
-        END AS MADE_DT,
-        prov.PROVINCE_CD AS PROVINCE
+        END AS MADE_DT
     FROM ingestion.AIRB_MORT_MTH_SNAPSHOT airb
-    LEFT JOIN reference.PROVINCE_REF prov ON
-        TRY_CAST(airb.PROP_PROV AS INTEGER) = TRY_CAST(prov.PROVINCE_ID AS INTEGER)
     LEFT JOIN ingestion.BASEL_MORT_MTH_SNAPSHOT mor ON
         airb.MORT_NUM = mor.MORT_NUM
         AND airb.TM_ID = mor.MTH_TM_ID
@@ -67,7 +64,7 @@ metrpl_cma AS(
         METRPL_AREA_NM,
         CMA,
         SRC_SYS_CD,
-        PROV,
+        PROV AS PROVINCE,
         STREAM
     FROM instruments.METRPL_AREA_NM
     WHERE
@@ -85,7 +82,7 @@ joined_metrpl AS (
         DATE_TRUNC('month', s.MADE_DT) + INTERVAL '1 month' - INTERVAL '1 day' AS MADE_DT,
         s.PROCESS_DATE,
         s.LEND_VALUE AS LEND_VAL2,
-        s.PROVINCE
+        m.PROVINCE
     FROM metrpl_cma m
     LEFT JOIN snapshot_c s ON
         s.BASEL_ACCT_ID = m.BASEL_ACCT_ID

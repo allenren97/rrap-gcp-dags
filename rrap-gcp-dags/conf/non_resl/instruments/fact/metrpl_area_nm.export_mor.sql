@@ -15,30 +15,55 @@ WITH snapshot_c AS (
         CAST(PROPERTY_ADDR_3 AS VARCHAR(112)) AS PROPERTY_ADDR_3,
 
         COALESCE(prov.PROVINCE_CD, UPPER(TRIM(regexp_extract(PROPERTY_ADDR_3, '([^ ]+)$', 1)))) AS PROV,
+        
         trim(
                 regexp_replace(
-                strip_accents(lower(coalesce(PROPERTY_ADDR_1, ''))),
-                '[^a-z0-9]+',
+                regexp_replace(
+                        translate(lower(PROPERTY_ADDR_1),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
+                ),
+                '\s+',
                 ' ',
                 'g'
                 )
-            ) AS PROPERTY_ADDR_11,
-        trim(
+        ) AS PROPERTY_ADDR_11,
+        trim(   
                 regexp_replace(
-                strip_accents(lower(coalesce(PROPERTY_ADDR_2, ''))),
-                '[^a-z0-9]+',
+                regexp_replace(
+                        translate(lower(PROPERTY_ADDR_2),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
+                ),
+                '\s+',
                 ' ',
                 'g'
                 )
-            ) AS PROPERTY_ADDR_22,
+        ) AS PROPERTY_ADDR_22,
         trim(
                 regexp_replace(
-                strip_accents(lower(coalesce(PROPERTY_ADDR_3, ''))),
-                '[^a-z0-9]+',
+                regexp_replace(
+                        translate(lower(PROPERTY_ADDR_3),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
+                ),
+                '\s+',
                 ' ',
                 'g'
                 )
-            ) AS PROPERTY_ADDR_33
+        ) AS PROPERTY_ADDR_33
     FROM {{upstream_asset[1]}}
     LEFT JOIN {{upstream_asset[4]}} prov
     ON prop_prov = PROVINCE_ID
@@ -78,12 +103,20 @@ PRPTY_LOCTN_NM2 AS (
                 *,
                 trim(
                 regexp_replace(
-                strip_accents(lower(coalesce(PRPTY_LOCTN_NM, ''))),
-                '[^a-z0-9]+',
+                regexp_replace(
+                        translate(lower(PRPTY_LOCTN_NM),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
+                ),
+                '\s+',
                 ' ',
                 'g'
                 )
-                ) AS PRPTY_LOCTN_NM2
+        ) AS PRPTY_LOCTN_NM2
         FROM dedup
 ),
 substrings AS (

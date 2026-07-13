@@ -12,13 +12,24 @@ UPSTREAM_ASSET = ["ingestion.CANDN_POPN_MTH_SNAPSHOT",
 
 DOWNSTREAM_ASSET = "features.METRPL_SCRI_VAL"
 DEPENDENCIES = {
+    "branch_decide": ["export_qtrly_pop"],
     "export_qtrly_pop": ["export_hh_disp_income"],
     "export_hh_disp_income": ["export_smoothed_index"],
     "export_smoothed_index": ["export_candn_per_capita_incm_amt"],
     "export_candn_per_capita_incm_amt": ["export_metrpl_scri_val"],
     "export_metrpl_scri_val": ["duckdb_clear"],
-    "duckdb_clear": ["duckdb_load"]
+    "duckdb_clear": ["duckdb_load"],
+    "duckdb_load": ['empty_task']
 }
+
+def branch_decide():
+    context = get_current_context()
+    rundate, _ = _pull_asset_event_extras(context, UPSTREAM_ASSET[0])
+    month = int(rundate.split('-')[1])
+    if month not in (1,4,7,10):
+        return ["derived__metrpl_scri_val.export_qtrly_pop"]
+    
+    return 'empty_task'
 
 def export_qtrly_pop(
     duckdb_conn_id = "duckdb-conn",
@@ -142,3 +153,6 @@ def duckdb_load(
     """
 ):
   pass
+
+def empty_task(trigger_rule='all_done'):
+   pass

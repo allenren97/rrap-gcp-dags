@@ -15,7 +15,6 @@ UPSTREAM_ASSET = [
     "reference.TRNST_EXCLSN_LKP",
     "ingestion.BASEL_ACCT_DIM",
     "ingestion.TNG_ACCT_MO",
-    "ingestion.BASELAYER_MOR",
     "features.PD_OFF_DT",
     "features.OS_BAL_AMT_IF",
     "features.TREATMENT_F"
@@ -86,11 +85,8 @@ def export_mor(
             '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
             mor.BASEL_ACCT_ID,
             'MOR' AS SRC_SYS_CD,
-            base.TREATMENT_FLAG AS CONSM_PRD_TREATMNT_CD_IF
+            'A' AS CONSM_PRD_TREATMNT_CD_IF
         FROM {UPSTREAM_ASSET[1]} mor
-        LEFT JOIN {UPSTREAM_ASSET[8]} base ON
-            mor.MORT_NUM = base.MORT_NUM
-            AND base.MTH_END_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
         WHERE MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
     """,
 ):
@@ -109,7 +105,7 @@ def export_spl(
             ELSE NULL
         END AS CONSM_PRD_TREATMNT_CD_IF
     FROM {UPSTREAM_ASSET[2]} a
-    LEFT JOIN {UPSTREAM_ASSET[11]} treat ON
+    LEFT JOIN {UPSTREAM_ASSET[10]} treat ON
         a.BASEL_ACCT_ID = treat.BASEL_ACCT_ID
         AND treat.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
     WHERE a.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
@@ -132,10 +128,10 @@ def export_tng(
         dim.SRC_APP_CD = 'TNG-MOR'
         AND dim.SRC_SYS_DEL_F != 'Y'
         AND TRIM(tng.ACCOUNT_ID) = TRIM(dim.SRC_APP_ID)
-    LEFT JOIN {UPSTREAM_ASSET[9]} pd ON
+    LEFT JOIN {UPSTREAM_ASSET[8]} pd ON
         dim.BASEL_ACCT_ID = pd.BASEL_ACCT_ID
         AND pd.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-    LEFT JOIN {UPSTREAM_ASSET[10]} os_bal ON
+    LEFT JOIN {UPSTREAM_ASSET[9]} os_bal ON
         dim.BASEL_ACCT_ID = os_bal.BASEL_ACCT_ID
         AND os_bal.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
     WHERE tng.MONTH_END_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'

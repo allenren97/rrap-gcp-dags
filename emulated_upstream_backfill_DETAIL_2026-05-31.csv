@@ -1,0 +1,41 @@
+layer,emulated_table,upstream_source,source_type,src_sys_cd,months_needed,window,start_month,end_month,notes
+ingestion,BASEL_MORT_ACCT_DRVD_VARS,ingestion.BASEL_MORT_MTH_SNAPSHOT,ingestion,,1,P only,2026-05-31,2026-05-31,
+ingestion,BASEL_MORT_ACCT_DRVD_VARS,ingestion.BASEL_ACCT_DIM,ingestion,,1,P only (dimension),2026-05-31,2026-05-31,
+ingestion,BASEL_MORT_ACCT_DRVD_VARS,ingestion.TM_DIM,ingestion,,all,calendar (load once),,,
+reference,BASEL_MORT_ACCT_DRVD_VARS,reference.TRNST_EXCLSN_LKP,reference,,static,load once,,,
+ingestion,BASEL_PSNL_LOAN_ACCT_DRVD_VARS,ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT,ingestion,,1,P only,2026-05-31,2026-05-31,
+ingestion,BASEL_PSNL_LOAN_ACCT_DRVD_VARS,ingestion.BASEL_ACCT_DIM,ingestion,,1,P only (dimension),2026-05-31,2026-05-31,
+reference,BASEL_PSNL_LOAN_ACCT_DRVD_VARS,reference.TRNST_EXCLSN_LKP,reference,,static,load once,,,
+ingestion,BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2,ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT,ingestion,,2,P and P-1 (prev_mth),2026-04-30,2026-05-31,reads prev-month snapshot
+emulated,BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2,emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS,emulated,,1,P only,2026-05-31,2026-05-31,internal (2105)
+ingestion,BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2,ingestion.BASEL_PSNL_LN_SUBV_MST_SNAPSHT_NEW,ingestion,,1,P only,2026-05-31,2026-05-31,
+features,BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2,features.PIT_STATUS_CROSS_DEFAULT_ORIG,features,SPL,1,P only,2026-05-31,2026-05-31,
+reference,BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2,reference.PSNL_LOAN_SCRTY_CD_PRPS_CD_LKP,reference,,static,load once,,,
+reference,BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2,reference.PSNL_LOAN_SCRTY_CD_LKP,reference,,static,load once,,,
+ingestion,BASEL_REVLVNG_CR_BASE_DRVD_VARS,ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT,ingestion,,1,P only,2026-05-31,2026-05-31,
+features,BASEL_REVLVNG_CR_BASE_DRVD_VARS,features.PIT_STAT_VER_2_CD90,features,,1,P only,2026-05-31,2026-05-31,
+features,BASEL_REVLVNG_CR_BASE_DRVD_VARS,features.PIT_STAT_VER_2_CD180,features,,1,P only,2026-05-31,2026-05-31,
+features,BASEL_REVLVNG_CR_BASE_DRVD_VARS,features.PIT_STATUS_CROSS_DEFAULT_ORIG,features,KS,1,P only,2026-05-31,2026-05-31,
+features,BASEL_REVLVNG_CR_BASE_DRVD_VARS,features.CONSM_PRD_TREATMNT_CD,features,KS,1,P only,2026-05-31,2026-05-31,
+features,BASEL_REVLVNG_CR_BASE_DRVD_VARS,features.TRNST_EXCLSN_F,features,KS,1,P only,2026-05-31,2026-05-31,
+ingestion,BASEL_REVLVNG_CR_BASE_DRVD_VARS,ingestion.TM_DIM,ingestion,,all,calendar (load once),,,
+reference,BASEL_REVLVNG_CR_BASE_DRVD_VARS,reference.(BLOCK_RECL/CHRG_OFF/SRC_PRD/RPTG_PRD lkps),reference,,static,load once,,,
+ingestion,PSNL_LOAN_OBSVTN_PT_DRVD_VAR,ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT,ingestion,,49,P-48 to P,2022-05-31,2026-05-31,48-mo lookback
+features,PSNL_LOAN_OBSVTN_PT_DRVD_VAR,features.PIT_STATUS_CROSS_DEFAULT_ORIG,features,SPL,49,P-48 to P,2022-05-31,2026-05-31,
+features,PSNL_LOAN_OBSVTN_PT_DRVD_VAR,features.TREATMENT_F,features,SPL,49,P-48 to P,2022-05-31,2026-05-31,
+features,PSNL_LOAN_OBSVTN_PT_DRVD_VAR,features.SUB_PORT_F,features,SPL,2,"anchors P-24, P-12",2024-05-31,2025-05-31,only the 2 anchor months
+ingestion,PSNL_LOAN_OBSVTN_PT_DRVD_VAR,ingestion.TM_DIM,ingestion,,all,calendar (load once),,,
+ingestion,REVLVNG_CR_OBSVTN_PT_DRVD_VAR,ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT,ingestion,,38,P-48..P-24 and P-12..P (gap P-23..P-13),2022-05-31,2026-05-31,split window
+features,REVLVNG_CR_OBSVTN_PT_DRVD_VAR,features.PIT_STATUS_CROSS_DEFAULT_ORIG,features,KS,38,P-48..P-24 and P-12..P,2022-05-31,2026-05-31,split window
+features,REVLVNG_CR_OBSVTN_PT_DRVD_VAR,features.BASEL_PRD_CD,features,,38,P-48..P-24 and P-12..P,2022-05-31,2026-05-31,split window
+features,REVLVNG_CR_OBSVTN_PT_DRVD_VAR,features.HELOC_F,features,,38,P-48..P-24 and P-12..P,2022-05-31,2026-05-31,split window
+features,REVLVNG_CR_OBSVTN_PT_DRVD_VAR,features.ACCRL_STAT_F,features,,38,P-48..P-24 and P-12..P,2022-05-31,2026-05-31,split window
+features,REVLVNG_CR_OBSVTN_PT_DRVD_VAR,features.SML_BUS_F,features,,2,"anchors P-24, P-12",2024-05-31,2025-05-31,anchor months
+features,REVLVNG_CR_OBSVTN_PT_DRVD_VAR,features.CONSM_PRD_TREATMNT_CD,features,KS,2,"anchors P-24, P-12",2024-05-31,2025-05-31,anchor months
+features,REVLVNG_CR_OBSVTN_PT_DRVD_VAR,features.TRNST_EXCLSN_F,features,KS,0,unused,,,declared upstream but not used
+ingestion,REVLVNG_CR_OBSVTN_PT_DRVD_VAR,ingestion.TM_DIM,ingestion,,all,calendar (load once),,,
+ingestion,STATUS_FINAL,ingestion.MORTGAGE_HIST,ingestion,,39,P-38 to P,2023-03-31,2026-05-31,39 monthly runs (TWELVE_MON needs history)
+features,STATUS_FINAL,features.MORT_NUM,features,MOR,39,P-38 to P,2023-03-31,2026-05-31,39 monthly runs
+features,STATUS_FINAL,features.PIT_STATUS_CROSS_DEFAULT_ORIG,features,MOR,39,P-38 to P,2023-03-31,2026-05-31,39 monthly runs
+emulated,TWELVE_MON_DEF_WINDOW,emulated.STATUS_FINAL,emulated,,39,P-38 to P,2023-03-31,2026-05-31,reads 39 months of STATUS_FINAL
+external,CBS_MDM_FLAGS,crz_cust_scorecard.cbs_mdm_flags (Hive/external),external,,1,P only,2026-05-31,2026-05-31,loaded by sq084

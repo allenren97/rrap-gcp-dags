@@ -25,6 +25,7 @@ def delete_excel_file(pool="duckdb_pool", pool_slots=16):
     if os.path.exists(file):
         os.remove(file)
 
+
 def generate_report(pool="duckdb_pool", pool_slots=16):
     context = get_current_context()
     obsn_dt = context['ti'].xcom_pull(task_ids="handle_month_context", key="rundate")

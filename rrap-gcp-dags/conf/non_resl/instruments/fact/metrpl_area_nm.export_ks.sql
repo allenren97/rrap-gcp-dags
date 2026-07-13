@@ -21,42 +21,54 @@ WITH snapshot_c AS (
         END AS PROV,
         trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PRPTY_DESC_1, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                        regexp_replace(
+                        translate(lower(PRPTY_DESC_1),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
-                'g'
+                        'g'
                 )
-            ) AS PRPTY_DESC_11,
+        ) AS PRPTY_DESC_11,
 
         trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PRPTY_DESC_2, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                        regexp_replace(
+                        translate(lower(PRPTY_DESC_2),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
-                'g'
+                        'g'
                 )
-            ) AS PRPTY_DESC_22,
+        ) AS PRPTY_DESC_22,
 
         trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PRPTY_DESC_3, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                        regexp_replace(
+                        translate(lower(PRPTY_DESC_3),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
-                'g'
+                        'g'
                 )
-            ) AS PRPTY_DESC_33
+        ) AS PRPTY_DESC_33
 
     FROM {{upstream_asset[1]}}
     WHERE MTH_TM_ID = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}
@@ -95,16 +107,20 @@ PRPTY_LOCTN_NM2 AS (
                 *,
                 trim(
                 regexp_replace(
-                translate(
-                    lower(coalesce(PRPTY_LOCTN_NM, '')),
-                    'àáâäãåçèéêëìíîïñòóôöõùúûüýÿ',
-                    'aaaaaaceeeeiiiinooooouuuuyy'
+                        regexp_replace(
+                        translate(lower(PRPTY_LOCTN_NM),
+                        'àâäçèéêëîïôùûüÿ,''/-',
+                        'aaaceeeeiiouuuy    '
+                        ),
+                        '[^a-z0-9 ]',
+                        '',
+                        'g'
                 ),
-                '[^a-z0-9]+',
+                '\s+',
                 ' ',
-                'g'
+                        'g'
                 )
-                ) AS PRPTY_LOCTN_NM2
+        ) AS PRPTY_LOCTN_NM2
         FROM dedup
 ),
 substrings AS (

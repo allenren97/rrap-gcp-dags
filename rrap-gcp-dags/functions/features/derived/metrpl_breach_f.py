@@ -9,9 +9,19 @@ UPSTREAM_ASSET = ["features.METRPL_SCRI_VAL",
 
 DOWNSTREAM_ASSET = "features.METRPL_BREACH_F"
 DEPENDENCIES = {
-    "duckdb_clear": ["duckdb_load"]
+    "branch_decide": ["duckdb_clear"],
+    "duckdb_clear": ["duckdb_load"],
+    'duckdb_load': ['empty_task']
 }
 
+def branch_decide():
+    context = get_current_context()
+    rundate, _ = _pull_asset_event_extras(context, UPSTREAM_ASSET[0])
+    month = int(rundate.split('-')[1])
+    if month in (1,4,7,10):
+        return ["derived__metrpl_breach_f.duckdb_clear"]
+    
+    return 'empty_task'
 
 def duckdb_clear(
     duckdb_conn_id="duckdb-conn",
@@ -54,3 +64,6 @@ def duckdb_load(
     """
 ):
   pass
+
+def empty_task(trigger_rule='all_done'):
+    pass

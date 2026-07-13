@@ -57,9 +57,10 @@ SELECT dim.basel_acct_id,
       ON dim.BASEL_ACCT_ID = d.BASEL_ACCT_ID
       AND d.OBSN_DT = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
       AND d.stream = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}'
+    LEFT JOIN province as prov
+      ON TRIM(dim.SRC_APP_ID) = TRIM(prov.account_id)
     LEFT JOIN {{upstream_asset[3]}} lkp
-      ON FSA = lkp.PRPTY_LOCTN_NM
-    LEFT JOIN province prov
-      ON TRIM(tng.ACCOUNT_ID) = TRIM(prov.account_id)
+      ON tng.FSA = lkp.PRPTY_LOCTN_NM
+      and prov.PROVINCE = lkp.LOCTN_LABEL_1
     WHERE tng.MONTH_END_DT = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
  
