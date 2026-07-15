@@ -72,8 +72,9 @@ def export_dlqnt_day_cnt_mor(
             BASEL_ACCT_ID,
             CASE
                 WHEN PD_OFF_DT IS NOT NULL OR TRIM(PD_OFF_F) = 'Y' THEN 0
-                WHEN TRIM(FLOAT_CD) IN ('W', 'B', 'S') AND WK_FRST_UNPAID_DT IS NOT NULL THEN 
-                    CASE 
+                WHEN TRIM(FLOAT_CD) IN ('W', 'B', 'S') THEN
+                    CASE
+                        WHEN WK_FRST_UNPAID_DT IS NULL THEN NULL
                         WHEN LAST_BUSINESS_DAY - WK_FRST_UNPAID_DT < 0 THEN 0
                         ELSE LAST_BUSINESS_DAY - WK_FRST_UNPAID_DT
                     END
