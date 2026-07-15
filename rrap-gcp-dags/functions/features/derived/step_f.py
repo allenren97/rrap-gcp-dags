@@ -6,9 +6,10 @@ from bns.rrap.helpers.asset_event import (
 
 UPSTREAM_ASSET = ["features.STEP_CD",
                   "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
-                  "features.STEP_FLAG",
+                  "ingestion.BASELAYER_MOR",
                   "ingestion.TNG_ACCT_MO",
-                  "ingestion.BASEL_ACCT_DIM"]
+                  "ingestion.BASEL_ACCT_DIM",
+                  "ingestion.MORT_MTH_SNAPSHOT"]
 
 DOWNSTREAM_ASSET = "features.STEP_F"
 
@@ -53,16 +54,14 @@ def export_mor(
     sql=f"""
     SELECT
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
-        step.BASEL_ACCT_ID,
+        mor.BASEL_ACCT_ID,
         'MOR' AS SRC_SYS_CD,
-        CASE
-            WHEN step.STEP_FLAG = 'STEP' THEN 'Y'
-            WHEN step.STEP_FLAG = 'STANDALONE' THEN 'N'
-            ELSE NULL
-        END AS STEP_F
-    FROM {UPSTREAM_ASSET[2]} step
-    WHERE step.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-        AND step.SRC_SYS_CD = 'MOR'
+        base.STEP_FLAG as STEP_F
+    FROM {UPSTREAM_ASSET[5]} mor
+    LEFT JOIN {UPSTREAM_ASSET[2]} base ON
+        mor.MORT_NUM = base.MORT_NUM
+        AND base.MTH_END_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+    WHERE mor.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
     """
 ):
     pass
