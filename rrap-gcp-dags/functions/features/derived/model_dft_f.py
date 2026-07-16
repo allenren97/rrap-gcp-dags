@@ -8,14 +8,23 @@ from bns.rrap.helpers.asset_event import (
 
 UPSTREAM_ASSET = [
     "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
+    "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
     "ingestion.TM_DIM",
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
     "features.TREATMENT_F",
     "features.SUB_PORT_F",
+    "features.BASEL_PRD_CD",
+    "features.HELOC_F",
+    "features.ACCRL_STAT_F",
+    "features.CONSM_PRD_TREATMNT_CD",
+    "features.SML_BUS_F",
+    "features.TRNST_EXCLSN_F",
 ]
 DOWNSTREAM_ASSET = "features.MODEL_DFT_F"
 DEPENDENCIES = {
-    "duckdb_delete": ["duckdb_load"],
+    "duckdb_delete": ["export_spl", "export_ks"],
+    "export_spl": ["duckdb_load"],
+    "export_ks": ["duckdb_load"],
 }
 
 
@@ -28,12 +37,11 @@ def duckdb_delete(
     pass
 
 
-def duckdb_load(
+def export_spl(
     duckdb_conn_id="duckdb-conn",
     resource_tier="HIGH",
     pool_slots=96,
     sql=f"""
-    INSERT INTO {DOWNSTREAM_ASSET} BY NAME
     WITH
         mth_tm_id AS (
             SELECT {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS val
@@ -301,6 +309,444 @@ def duckdb_load(
         MODEL_DFT_F,
         'SPL' AS SRC_SYS_CD
     FROM combined
+    """,
+):
+    pass
+
+
+def export_ks(
+    duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
+    sql=f"""
+    WITH
+        mth_tm_id AS (
+            SELECT {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS val
+        ),
+        dataprep_full AS MATERIALIZED (
+            SELECT
+                snp.BASEL_ACCT_ID,
+                'KS' AS SRC_SYS_CD,
+                snp.MTH_TM_ID,
+                snp.TOT_NEW_BAL_AMT AS OS_BAL_AMT,
+                snp.TOT_UNPAID_FNCL_CHRG_AMT,
+                accrl.ACCRL_STAT_F,
+                pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS PIT_STATUS_CD,
+                prd.BASEL_PRD_CD,
+                CAST(NULL AS DOUBLE) AS TOT_CRNT_BAL_AMT,
+                trt.CONSM_PRD_TREATMNT_CD,
+                sml.SML_BUS_F,
+                trnst.TRNST_EXCLSN_F,
+                heloc.HELOC_F
+            FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT snp
+            INNER JOIN ingestion.TM_DIM tm
+                ON snp.MTH_TM_ID = tm.TM_ID
+               AND TRIM(tm.TM_LVL) = 'Month'
+            CROSS JOIN mth_tm_id
+            LEFT JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, BASEL_PRD_CD
+                FROM features.BASEL_PRD_CD
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY BASEL_PRD_CD DESC NULLS LAST
+                ) = 1
+            ) prd
+                ON snp.BASEL_ACCT_ID = prd.BASEL_ACCT_ID
+               AND prd.OBSN_DT = tm.TM_LVL_END_DT
+            LEFT JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, PIT_STATUS_CROSS_DEFAULT_ORIG
+                FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
+                ) = 1
+            ) pit
+                ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+               AND pit.OBSN_DT = tm.TM_LVL_END_DT
+            LEFT JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, HELOC_F
+                FROM features.HELOC_F
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY HELOC_F DESC NULLS LAST
+                ) = 1
+            ) heloc
+                ON snp.BASEL_ACCT_ID = heloc.BASEL_ACCT_ID
+               AND heloc.OBSN_DT = tm.TM_LVL_END_DT
+            LEFT JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, ACCRL_STAT_F
+                FROM features.ACCRL_STAT_F
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY ACCRL_STAT_F DESC NULLS LAST
+                ) = 1
+            ) accrl
+                ON snp.BASEL_ACCT_ID = accrl.BASEL_ACCT_ID
+               AND accrl.OBSN_DT = tm.TM_LVL_END_DT
+            LEFT JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, CONSM_PRD_TREATMNT_CD
+                FROM features.CONSM_PRD_TREATMNT_CD
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY CONSM_PRD_TREATMNT_CD DESC NULLS LAST
+                ) = 1
+            ) trt
+                ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
+               AND trt.OBSN_DT = tm.TM_LVL_END_DT
+            LEFT JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, SML_BUS_F
+                FROM features.SML_BUS_F
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY SML_BUS_F DESC NULLS LAST
+                ) = 1
+            ) sml
+                ON snp.BASEL_ACCT_ID = sml.BASEL_ACCT_ID
+               AND sml.OBSN_DT = tm.TM_LVL_END_DT
+            LEFT JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, TRNST_EXCLSN_F
+                FROM features.TRNST_EXCLSN_F
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY TRNST_EXCLSN_F DESC NULLS LAST
+                ) = 1
+            ) trnst
+                ON snp.BASEL_ACCT_ID = trnst.BASEL_ACCT_ID
+               AND trnst.OBSN_DT = tm.TM_LVL_END_DT
+            WHERE snp.MTH_TM_ID >= mth_tm_id.val - 48 * 40
+              AND snp.MTH_TM_ID <= mth_tm_id.val
+        ),
+        lagged_pdead AS (
+            SELECT
+                *,
+                LAG(OS_BAL_AMT) OVER (PARTITION BY BASEL_ACCT_ID ORDER BY MTH_TM_ID) AS LAG_OS_BAL_AMT,
+                LAG(TOT_UNPAID_FNCL_CHRG_AMT) OVER (PARTITION BY BASEL_ACCT_ID ORDER BY MTH_TM_ID) AS LAG_TOT_UNPAID_FNCL_CHRG_AMT,
+                LAG(PIT_STATUS_CD) OVER (PARTITION BY BASEL_ACCT_ID ORDER BY MTH_TM_ID) AS LAG_PIT_STATUS_CD
+            FROM dataprep_full
+            CROSS JOIN mth_tm_id
+            WHERE MTH_TM_ID >= mth_tm_id.val - 12 * 40
+              AND MTH_TM_ID <= mth_tm_id.val
+        ),
+        new_defaults_pdead AS (
+            SELECT BASEL_ACCT_ID, MTH_TM_ID
+            FROM lagged_pdead
+            WHERE CASE
+                WHEN SRC_SYS_CD IN ('SPL')
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND OS_BAL_AMT >= 1
+                 AND TOT_CRNT_BAL_AMT > 0
+                 AND COALESCE(LAG_PIT_STATUS_CD, 'CUR') NOT IN ('DEF', 'CHG')
+                THEN 1
+                WHEN SRC_SYS_CD IN ('TNG-MOR', 'MOR')
+                 AND PIT_STATUS_CD IN ('DEF')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                THEN 1
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD = 'CC'
+                 AND HELOC_F = 'N'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                 AND OS_BAL_AMT > 0
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT <> LAG_OS_BAL_AMT
+                THEN 1
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD = 'CC'
+                 AND HELOC_F = 'N'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                 AND OS_BAL_AMT > 0
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT = LAG_OS_BAL_AMT
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT <= 0
+                THEN 1
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD = 'CC'
+                 AND HELOC_F = 'N'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                 AND OS_BAL_AMT > 0
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT = LAG_OS_BAL_AMT
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT > 0
+                 AND TOT_UNPAID_FNCL_CHRG_AMT <> OS_BAL_AMT
+                 AND PIT_STATUS_CD <> 'CHG'
+                 AND OS_BAL_AMT >= 5
+                THEN 1
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD = 'CC'
+                 AND HELOC_F = 'N'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                THEN 0
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD = 'CC'
+                 AND HELOC_F = 'Y'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT <> LAG_OS_BAL_AMT
+                 AND OS_BAL_AMT > 0
+                THEN 1
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD <> 'CC'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT <> LAG_OS_BAL_AMT
+                 AND OS_BAL_AMT > 0
+                THEN 1
+                ELSE 0
+            END = 1
+        ),
+        defaults_pdead AS (
+            SELECT BASEL_ACCT_ID, MAX(MTH_TM_ID) AS LAST_NEW_DEFAULT_DATE
+            FROM new_defaults_pdead
+            GROUP BY BASEL_ACCT_ID
+        ),
+        pdead AS (
+            SELECT
+                d.BASEL_ACCT_ID,
+                1 AS MODEL_DFT_F,
+                d.LAST_NEW_DEFAULT_DATE,
+                CASE
+                    WHEN snp_def.SRC_SYS_CD IN ('KS')
+                     AND (snp_def.PIT_STATUS_CD = 'CHG' OR snp_def.ACCRL_STAT_F = 'N')
+                     AND snp_def.OS_BAL_AMT = 0
+                    THEN GREATEST(COALESCE(snp_def_ks_lag.OS_BAL_AMT, 0), 0)
+                    ELSE GREATEST(COALESCE(snp_def.OS_BAL_AMT, 0), 0)
+                END AS LAST_NEW_DEFAULT_OS_BAL_AMT
+            FROM defaults_pdead d
+            LEFT JOIN dataprep_full snp_def
+                ON snp_def.BASEL_ACCT_ID = d.BASEL_ACCT_ID
+               AND snp_def.MTH_TM_ID = d.LAST_NEW_DEFAULT_DATE
+            LEFT JOIN dataprep_full snp_def_ks_lag
+                ON snp_def_ks_lag.BASEL_ACCT_ID = d.BASEL_ACCT_ID
+               AND snp_def_ks_lag.MTH_TM_ID = d.LAST_NEW_DEFAULT_DATE - 40
+        ),
+        lagged_lgd AS (
+            SELECT
+                *,
+                LAG(OS_BAL_AMT) OVER (PARTITION BY BASEL_ACCT_ID ORDER BY MTH_TM_ID) AS LAG_OS_BAL_AMT,
+                LAG(TOT_UNPAID_FNCL_CHRG_AMT) OVER (PARTITION BY BASEL_ACCT_ID ORDER BY MTH_TM_ID) AS LAG_TOT_UNPAID_FNCL_CHRG_AMT,
+                LAG(PIT_STATUS_CD) OVER (PARTITION BY BASEL_ACCT_ID ORDER BY MTH_TM_ID) AS LAG_PIT_STATUS_CD
+            FROM dataprep_full
+            CROSS JOIN mth_tm_id
+            WHERE MTH_TM_ID >= mth_tm_id.val - 48 * 40
+              AND MTH_TM_ID <= mth_tm_id.val - 24 * 40
+        ),
+        new_defaults_lgd AS (
+            SELECT BASEL_ACCT_ID, MTH_TM_ID
+            FROM lagged_lgd
+            WHERE CASE
+                WHEN SRC_SYS_CD IN ('SPL')
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND OS_BAL_AMT >= 1
+                 AND TOT_CRNT_BAL_AMT > 0
+                 AND COALESCE(LAG_PIT_STATUS_CD, 'CUR') NOT IN ('DEF', 'CHG')
+                THEN 1
+                WHEN SRC_SYS_CD IN ('TNG-MOR', 'MOR')
+                 AND PIT_STATUS_CD IN ('DEF')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                THEN 1
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD = 'CC'
+                 AND HELOC_F = 'N'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                 AND OS_BAL_AMT > 0
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT <> LAG_OS_BAL_AMT
+                THEN 1
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD = 'CC'
+                 AND HELOC_F = 'N'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                 AND OS_BAL_AMT > 0
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT = LAG_OS_BAL_AMT
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT <= 0
+                THEN 1
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD = 'CC'
+                 AND HELOC_F = 'N'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                 AND OS_BAL_AMT > 0
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT = LAG_OS_BAL_AMT
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT > 0
+                 AND TOT_UNPAID_FNCL_CHRG_AMT <> OS_BAL_AMT
+                 AND PIT_STATUS_CD <> 'CHG'
+                 AND OS_BAL_AMT >= 5
+                THEN 1
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD = 'CC'
+                 AND HELOC_F = 'N'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                THEN 0
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD = 'CC'
+                 AND HELOC_F = 'Y'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT <> LAG_OS_BAL_AMT
+                 AND OS_BAL_AMT > 0
+                THEN 1
+                WHEN SRC_SYS_CD IN ('KS')
+                 AND BASEL_PRD_CD <> 'CC'
+                 AND PIT_STATUS_CD IN ('DEF', 'CHG')
+                 AND LAG_PIT_STATUS_CD = 'CUR'
+                 AND LAG_TOT_UNPAID_FNCL_CHRG_AMT <> LAG_OS_BAL_AMT
+                 AND OS_BAL_AMT > 0
+                THEN 1
+                ELSE 0
+            END = 1
+        ),
+        defaults_lgd AS (
+            SELECT BASEL_ACCT_ID, MAX(MTH_TM_ID) AS LAST_NEW_DEFAULT_DATE
+            FROM new_defaults_lgd
+            GROUP BY BASEL_ACCT_ID
+        ),
+        lgd AS (
+            SELECT
+                d.BASEL_ACCT_ID,
+                1 AS MODEL_DFT_F,
+                d.LAST_NEW_DEFAULT_DATE,
+                CASE
+                    WHEN snp_def.SRC_SYS_CD IN ('KS')
+                     AND (snp_def.PIT_STATUS_CD = 'CHG' OR snp_def.ACCRL_STAT_F = 'N')
+                     AND snp_def.OS_BAL_AMT = 0
+                    THEN GREATEST(COALESCE(snp_def_ks_lag.OS_BAL_AMT, 0), 0)
+                    ELSE GREATEST(COALESCE(snp_def.OS_BAL_AMT, 0), 0)
+                END AS LAST_NEW_DEFAULT_OS_BAL_AMT
+            FROM defaults_lgd d
+            LEFT JOIN dataprep_full snp_def
+                ON snp_def.BASEL_ACCT_ID = d.BASEL_ACCT_ID
+               AND snp_def.MTH_TM_ID = d.LAST_NEW_DEFAULT_DATE
+            LEFT JOIN dataprep_full snp_def_ks_lag
+                ON snp_def_ks_lag.BASEL_ACCT_ID = d.BASEL_ACCT_ID
+               AND snp_def_ks_lag.MTH_TM_ID = d.LAST_NEW_DEFAULT_DATE - 40
+        ),
+        pdead_rows AS (
+            SELECT
+                snp.MTH_TM_ID AS OBSVTN_MTH_TM_ID,
+                b.BASEL_ACCT_ID,
+                b.LAST_NEW_DEFAULT_OS_BAL_AMT AS LAST_NEW_DFT_BAL_AMT,
+                t.TM_LVL_END_DT AS LAST_NEW_DFT_DT,
+                CASE WHEN b.MODEL_DFT_F = 1 THEN 'Y' ELSE 'N' END AS MODEL_DFT_F
+            FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT snp
+            CROSS JOIN mth_tm_id
+            INNER JOIN ingestion.TM_DIM obs_tm
+                ON snp.MTH_TM_ID = obs_tm.TM_ID
+               AND TRIM(obs_tm.TM_LVL) = 'Month'
+            INNER JOIN pdead b
+                ON snp.BASEL_ACCT_ID = b.BASEL_ACCT_ID
+            INNER JOIN ingestion.TM_DIM t
+                ON b.LAST_NEW_DEFAULT_DATE = t.TM_ID
+               AND TRIM(t.TM_LVL) = 'Month'
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, PIT_STATUS_CROSS_DEFAULT_ORIG
+                FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
+                ) = 1
+            ) pit
+                ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+               AND pit.OBSN_DT = obs_tm.TM_LVL_END_DT
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, SML_BUS_F
+                FROM features.SML_BUS_F
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY SML_BUS_F DESC NULLS LAST
+                ) = 1
+            ) sml
+                ON snp.BASEL_ACCT_ID = sml.BASEL_ACCT_ID
+               AND sml.OBSN_DT = obs_tm.TM_LVL_END_DT
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, CONSM_PRD_TREATMNT_CD
+                FROM features.CONSM_PRD_TREATMNT_CD
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY CONSM_PRD_TREATMNT_CD DESC NULLS LAST
+                ) = 1
+            ) trt
+                ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
+               AND trt.OBSN_DT = obs_tm.TM_LVL_END_DT
+            WHERE snp.MTH_TM_ID = mth_tm_id.val - 12 * 40
+              AND pit.PIT_STATUS_CROSS_DEFAULT_ORIG = 'CUR'
+              AND sml.SML_BUS_F = 'N'
+              AND trt.CONSM_PRD_TREATMNT_CD = 'A'
+        ),
+        lgd_rows AS (
+            SELECT
+                snp.MTH_TM_ID AS OBSVTN_MTH_TM_ID,
+                b.BASEL_ACCT_ID,
+                b.LAST_NEW_DEFAULT_OS_BAL_AMT AS LAST_NEW_DFT_BAL_AMT,
+                t.TM_LVL_END_DT AS LAST_NEW_DFT_DT,
+                CASE WHEN b.MODEL_DFT_F = 1 THEN 'Y' ELSE 'N' END AS MODEL_DFT_F
+            FROM ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT snp
+            CROSS JOIN mth_tm_id
+            INNER JOIN ingestion.TM_DIM obs_tm
+                ON snp.MTH_TM_ID = obs_tm.TM_ID
+               AND TRIM(obs_tm.TM_LVL) = 'Month'
+            INNER JOIN lgd b
+                ON snp.BASEL_ACCT_ID = b.BASEL_ACCT_ID
+            INNER JOIN ingestion.TM_DIM t
+                ON b.LAST_NEW_DEFAULT_DATE = t.TM_ID
+               AND TRIM(t.TM_LVL) = 'Month'
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, PIT_STATUS_CROSS_DEFAULT_ORIG
+                FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
+                ) = 1
+            ) pit
+                ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
+               AND pit.OBSN_DT = obs_tm.TM_LVL_END_DT
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, SML_BUS_F
+                FROM features.SML_BUS_F
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY SML_BUS_F DESC NULLS LAST
+                ) = 1
+            ) sml
+                ON snp.BASEL_ACCT_ID = sml.BASEL_ACCT_ID
+               AND sml.OBSN_DT = obs_tm.TM_LVL_END_DT
+            INNER JOIN (
+                SELECT BASEL_ACCT_ID, OBSN_DT, CONSM_PRD_TREATMNT_CD
+                FROM features.CONSM_PRD_TREATMNT_CD
+                WHERE SRC_SYS_CD = 'KS'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY CONSM_PRD_TREATMNT_CD DESC NULLS LAST
+                ) = 1
+            ) trt
+                ON snp.BASEL_ACCT_ID = trt.BASEL_ACCT_ID
+               AND trt.OBSN_DT = obs_tm.TM_LVL_END_DT
+            WHERE snp.MTH_TM_ID = mth_tm_id.val - 24 * 40
+              AND pit.PIT_STATUS_CROSS_DEFAULT_ORIG <> 'CUR'
+              AND sml.SML_BUS_F = 'N'
+              AND trt.CONSM_PRD_TREATMNT_CD = 'A'
+        ),
+        combined_ks AS (
+            SELECT * FROM pdead_rows
+            UNION ALL
+            SELECT * FROM lgd_rows
+        )
+    SELECT
+        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+        BASEL_ACCT_ID,
+        OBSVTN_MTH_TM_ID,
+        MODEL_DFT_F,
+        'KS' AS SRC_SYS_CD
+    FROM combined_ks
+    """,
+):
+    pass
+
+
+def duckdb_load(
+    duckdb_conn_id="duckdb-conn",
+    sql=f"""
+    INSERT INTO {DOWNSTREAM_ASSET} by name
+    FROM (
+        select * from read_parquet([
+            '{{{{ task_instance.xcom_pull(task_ids="derived__model_dft_f.export_spl", key="parquet") }}}}',
+            '{{{{ task_instance.xcom_pull(task_ids="derived__model_dft_f.export_ks", key="parquet") }}}}'],
+        union_by_name = true)
+    )
     """,
 ):
     pass
