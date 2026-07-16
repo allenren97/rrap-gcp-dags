@@ -5,7 +5,7 @@ UPSTREAM_ASSET = [
     "reference.GENWORTH_BULKINS",
 ]
 
-DOWNSTREAM_ASSET = "ingestion.MORTGAGE_HIST"
+DOWNSTREAM_ASSET = "emulated.MORTGAGE_HIST"
 
 DEPENDENCIES = {
     "duckdb_delete": ["duckdb_load"],
@@ -120,7 +120,7 @@ def duckdb_load(
             ),
             has_prior AS (
                 SELECT DISTINCT MORTGAGE_NO
-                FROM ingestion.MORTGAGE_HIST
+                FROM emulated.MORTGAGE_HIST
                 WHERE CAST(PROCESS_DATE AS DATE) < DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
             ),
             prior_prepay AS (
@@ -133,7 +133,7 @@ def duckdb_load(
                             PARTITION BY MORTGAGE_NO
                             ORDER BY PROCESS_DATE DESC
                         ) AS rn
-                    FROM ingestion.MORTGAGE_HIST
+                    FROM emulated.MORTGAGE_HIST
                     WHERE CAST(PROCESS_DATE AS DATE) < DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
                       AND PREPAY_YTD IS NOT NULL
                 ) t
@@ -149,7 +149,7 @@ def duckdb_load(
                             PARTITION BY MORTGAGE_NO
                             ORDER BY PROCESS_DATE DESC
                         ) AS rn
-                    FROM ingestion.MORTGAGE_HIST
+                    FROM emulated.MORTGAGE_HIST
                     WHERE CAST(PROCESS_DATE AS DATE) < DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
                       AND PROVINCE IS NOT NULL
                       AND TRIM(PROVINCE) <> ''

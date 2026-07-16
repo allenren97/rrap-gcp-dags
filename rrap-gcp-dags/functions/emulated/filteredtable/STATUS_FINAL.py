@@ -1,30 +1,32 @@
 """
 Rewrite of RRAP_MOR_MODEL_01_DEFINE_STATUS_G.sas + RRAP_MOR_MODEL_01A_GATHER_LOAD_G.sas.
 
-Builds emulated.STATUS_FINAL for the process month:
-  export_result — define status + exclusions from ingestion.MORTGAGE_HIST
-  duckdb_load   — insert parquet into DuckLake
-
-Logic mirrors 01_define_status.sas. Reuses existing features where available:
-  STATUS            — features.PIT_STATUS_CROSS_DEFAULT_ORIG (MOR) via features.MORT_NUM
-  DELQ_DAYS_2/MONTHS_2 — computed from ingestion.MORTGAGE_HIST (no feature; hist UNPD dates)
-  MODEL_EXCL        — derived inline from STATUS + hist paid-off/balance (no MOR feature)
-  Pass-through cols — ingestion.MORTGAGE_HIST (required by downstream PD/LGD jobs)
+Thin feature-join assembly of emulated.STATUS_FINAL — no emulated.MORTGAGE_HIST.
+Every column now comes from features (all keyed on BASEL_ACCT_ID + OBSN_DT, SRC_SYS_CD='MOR'):
+  MORTGAGE_NO    — features.MORT_NUM
+  STATUS         — features.PIT_STATUS_CROSS_DEFAULT_ORIG
+  CURRENT_BAL    — features.CURRENT_BAL      (raw CRNT_BAL_AMT)
+  TOTAL_SUSPENSE — features.TOTAL_SUSPENSE   (TOT_SUSP_BAL_AMT)
+  LRA_STATUS     — features.LRA_STATUS       (LRA_STAT)
+  PAID_OFF_DATE  — features.PAID_OFF_DATE    (PD_OFF_DT)
+  MODEL_EXCL     — derived from STATUS + CURRENT_BAL + features.PD_OFF_F
+  PROCESS_DATE   — the process month-end (rundate)
 """
 
 UPSTREAM_ASSET = [
-    "ingestion.MORTGAGE_HIST",
     "features.MORT_NUM",
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
+    "features.CURRENT_BAL",
+    "features.TOTAL_SUSPENSE",
+    "features.LRA_STATUS",
+    "features.PAID_OFF_DATE",
+    "features.PD_OFF_F",
 ]
 
 DOWNSTREAM_ASSET = "emulated.STATUS_FINAL"
 
-_TASK_GROUP = "filteredtable__STATUS_FINAL"
-
 DEPENDENCIES = {
-    "duckdb_delete": ["export_result"],
-    "export_result": ["duckdb_load"],
+    "duckdb_delete": ["duckdb_load"],
 }
 
 
@@ -39,165 +41,93 @@ def duckdb_delete(
     pass
 
 
-def export_result(
-    duckdb_conn_id="duckdb-conn",
-    sql=f"""
-    WITH
-        hist AS (
-            SELECT *
-            FROM ingestion.MORTGAGE_HIST
-            WHERE CAST(PROCESS_DATE AS DATE) = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-              AND CAST(PROCESS_DATE AS DATE) >= DATE '2010-01-31'
-        ),
-        with_delq AS (
-            SELECT
-                h.*,
-                CASE
-                    WHEN UPPER(TRIM(COALESCE(h.FLOAT_IND, ''))) IN ('W', 'B', 'S')
-                    THEN DATE_DIFF(
-                        'day',
-                        DATE_TRUNC('day', h.UNPD_WKL_PAY_DATE),
-                        DATE_TRUNC('day', h.PROCESS_DATE)
-                    )
-                    ELSE DATE_DIFF(
-                        'day',
-                        DATE_TRUNC('day', h.UNPD_MTH_PAY_DATE),
-                        DATE_TRUNC('day', h.PROCESS_DATE)
-                    )
-                END AS temp_delq_days_2
-            FROM hist h
-        ),
-        with_delq_days AS (
-            SELECT
-                d.*,
-                CASE
-                    WHEN d.PAID_OFF_DATE IS NOT NULL
-                         OR UPPER(TRIM(COALESCE(d.PAID_OFF_IND, ''))) = 'Y'
-                         OR d.temp_delq_days_2 IS NULL
-                         OR d.temp_delq_days_2 < 0
-                    THEN 0
-                    ELSE d.temp_delq_days_2
-                END AS delq_days_2
-            FROM with_delq d
-        ),
-        with_delq_days_clean AS (
-            SELECT * EXCLUDE (temp_delq_days_2)
-            FROM with_delq_days
-        ),
-        with_delq_mth AS (
-            SELECT
-                *,
-                CASE
-                    WHEN delq_days_2 = 0 THEN 0
-                    WHEN UPPER(TRIM(COALESCE(FLOAT_IND, ''))) IN ('W', 'B', 'S')
-                    THEN GREATEST(
-                        DATE_DIFF(
-                            'month',
-                            DATE_TRUNC('day', UNPD_WKL_PAY_DATE),
-                            DATE_TRUNC('day', PROCESS_DATE)
-                        ) + 1,
-                        0
-                    )
-                    ELSE GREATEST(
-                        DATE_DIFF(
-                            'month',
-                            DATE_TRUNC('day', UNPD_MTH_PAY_DATE),
-                            DATE_TRUNC('day', PROCESS_DATE)
-                        ) + 1,
-                        0
-                    )
-                END AS temp_delq_months_2
-            FROM with_delq_days_clean
-        ),
-        with_status AS (
-            SELECT
-                m.* EXCLUDE (temp_delq_months_2),
-                CASE
-                    WHEN m.delq_days_2 >= 90 AND m.temp_delq_months_2 = 3 THEN 4
-                    ELSE m.temp_delq_months_2
-                END AS delq_months_2,
-                pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS new_status
-            FROM with_delq_mth m
-            LEFT JOIN features.MORT_NUM mn
-                ON mn.SRC_SYS_CD = 'MOR'
-               AND mn.OBSN_DT = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-               AND m.MORTGAGE_NO = TRY_CAST(mn.MORT_NUM AS BIGINT)
-            LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
-                ON pit.SRC_SYS_CD = 'MOR'
-               AND pit.OBSN_DT = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-               AND pit.BASEL_ACCT_ID = mn.BASEL_ACCT_ID
-        )
-    SELECT
-        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
-        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
-        {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS MTH_TM_ID,
-        MORTGAGE_NO,
-        COMM_TYPE,
-        FLOAT_LKP_ID,
-        GENL_LKP_ID,
-        CURRENT_BAL,
-        DELQ_DAYS,
-        DELQ_MONTHS,
-        FLOAT_IND,
-        FORECLOSE_IND,
-        INT_ACCR_AMT,
-        LRA_STATUS,
-        PAID_OFF_DATE,
-        PAID_OFF_IND,
-        PROCESS_DATE,
-        TOTAL_SUSPENSE,
-        UNPD_MTH_PAY_DATE,
-        UNPD_WKL_PAY_DATE,
-        MADE_DATE,
-        TIME_KEY,
-        INT_ADJ_DATE,
-        YYMTH,
-        INSURANCE,
-        CLASS,
-        EFF_TMSTMP,
-        PRPTY_DESC_1,
-        PRPTY_DESC_2,
-        PRPTY_DESC_3,
-        LEND_VAL2,
-        TRNST,
-        AUTH_AMT,
-        MAT_DT,
-        CAB,
-        TOT_ADVNC_AMT,
-        PRIM_CUST_ID,
-        CIF_KEY,
-        STEP_F,
-        INSUR_GRP,
-        BULK_IND,
-        AMORT,
-        PREPAY_YTD,
-        PROVINCE,
-        delq_days_2 AS DELQ_DAYS_2,
-        delq_months_2 AS DELQ_MONTHS_2,
-        new_status AS STATUS,
-        CASE
-            WHEN UPPER(TRIM(COALESCE(PAID_OFF_IND, ''))) = 'Y'
-                 OR UPPER(TRIM(COALESCE(new_status, ''))) <> 'CUR'
-                 OR COALESCE(CURRENT_BAL, 0) <= 0
-            THEN 'Y'
-            ELSE 'N'
-        END AS MODEL_EXCL,
-        CURRENT_TIMESTAMP AS INSRT_PROCESS_TMSTMP,
-        CURRENT_TIMESTAMP AS UPDT_PROCESS_TMSTMP
-    FROM with_status
-    """,
-):
-    pass
-
-
 def duckdb_load(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
     INSERT INTO {DOWNSTREAM_ASSET} BY NAME
-    SELECT *
-    FROM read_parquet(
-        '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_result", key="parquet") }}}}'
-    )
+    SELECT
+        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
+        {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS MTH_TM_ID,
+        TRY_CAST(mn.MORT_NUM AS BIGINT) AS MORTGAGE_NO,
+        pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS STATUS,
+        CASE
+            WHEN UPPER(TRIM(COALESCE(pof.PD_OFF_F, ''))) = 'Y'
+                 OR UPPER(TRIM(COALESCE(pit.PIT_STATUS_CROSS_DEFAULT_ORIG, ''))) <> 'CUR'
+                 OR COALESCE(cb.CURRENT_BAL, 0) <= 0
+            THEN 'Y'
+            ELSE 'N'
+        END AS MODEL_EXCL,
+        lra.LRA_STATUS,
+        pod.PAID_OFF_DATE,
+        cb.CURRENT_BAL,
+        ts.TOTAL_SUSPENSE,
+        CAST('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS TIMESTAMP) AS PROCESS_DATE,
+        CURRENT_TIMESTAMP AS INSRT_PROCESS_TMSTMP,
+        CURRENT_TIMESTAMP AS UPDT_PROCESS_TMSTMP
+    FROM (
+        SELECT BASEL_ACCT_ID, MORT_NUM
+        FROM features.MORT_NUM
+        WHERE SRC_SYS_CD = 'MOR'
+          AND OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID ORDER BY MORT_NUM DESC NULLS LAST
+        ) = 1
+    ) mn
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, PIT_STATUS_CROSS_DEFAULT_ORIG
+        FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG
+        WHERE SRC_SYS_CD = 'MOR'
+          AND OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID ORDER BY PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
+        ) = 1
+    ) pit ON pit.BASEL_ACCT_ID = mn.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, CURRENT_BAL
+        FROM features.CURRENT_BAL
+        WHERE SRC_SYS_CD = 'MOR'
+          AND OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID ORDER BY CURRENT_BAL DESC NULLS LAST
+        ) = 1
+    ) cb ON cb.BASEL_ACCT_ID = mn.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, TOTAL_SUSPENSE
+        FROM features.TOTAL_SUSPENSE
+        WHERE SRC_SYS_CD = 'MOR'
+          AND OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID ORDER BY TOTAL_SUSPENSE DESC NULLS LAST
+        ) = 1
+    ) ts ON ts.BASEL_ACCT_ID = mn.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, LRA_STATUS
+        FROM features.LRA_STATUS
+        WHERE SRC_SYS_CD = 'MOR'
+          AND OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID ORDER BY LRA_STATUS DESC NULLS LAST
+        ) = 1
+    ) lra ON lra.BASEL_ACCT_ID = mn.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, PAID_OFF_DATE
+        FROM features.PAID_OFF_DATE
+        WHERE SRC_SYS_CD = 'MOR'
+          AND OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID ORDER BY PAID_OFF_DATE DESC NULLS LAST
+        ) = 1
+    ) pod ON pod.BASEL_ACCT_ID = mn.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, PD_OFF_F
+        FROM features.PD_OFF_F
+        WHERE SRC_SYS_CD = 'MOR'
+          AND OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID ORDER BY PD_OFF_F DESC NULLS LAST
+        ) = 1
+    ) pof ON pof.BASEL_ACCT_ID = mn.BASEL_ACCT_ID
     """,
 ):
     pass
