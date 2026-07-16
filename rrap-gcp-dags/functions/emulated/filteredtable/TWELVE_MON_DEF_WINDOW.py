@@ -7,7 +7,7 @@ DEFAULT_IND), which scan STATUS + CURRENT_BAL feature history directly — so th
 no longer reads emulated.STATUS_FINAL or emulated.MORTGAGE_HIST.
 
 One row per (MORTGAGE_NO, OBSVTN_MTH_TM_ID). OBSVTN_MTH_TM_ID identifies the obs-window
-start month; PROCESS_DATE is the window end (obs-start + 12 months) capped at the run month.
+start month; PROCESS_DATE is that obs-window start month-end (SAS mth_end_dt&mm).
 """
 
 UPSTREAM_ASSET = [
@@ -46,10 +46,7 @@ def duckdb_load(
         {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS MTH_TM_ID,
         TRY_CAST(mn.MORT_NUM AS BIGINT) AS MORTGAGE_NO,
         ind.OBSVTN_MTH_TM_ID,
-        LEAST(
-            LAST_DAY(DATE_TRUNC('month', obs.TM_LVL_END_DT) + INTERVAL 12 MONTH),
-            DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-        ) AS PROCESS_DATE,
+        obs.TM_LVL_END_DT AS PROCESS_DATE,
         dt.DEFAULT_DATE,
         bal.DEFAULT_BAL,
         ind.DEFAULT_IND,

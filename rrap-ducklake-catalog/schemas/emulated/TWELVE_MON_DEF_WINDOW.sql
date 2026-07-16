@@ -1,6 +1,6 @@
 -- BNS mortgage 12-month PD default observation windows (nzuser.twelve_mon_def_window).
 -- One row per (MORTGAGE_NO, OBSVTN_MTH_TM_ID). OBSVTN_MTH_TM_ID identifies the obs-window
--- start month; PROCESS_DATE is the window end (obs-start + 12 months) capped at the run month.
+-- start month; PROCESS_DATE is that obs-window start month-end (SAS mth_end_dt&mm).
 -- Assembled from the MOR window features (DEFAULT_DATE / DEFAULT_BAL / DEFAULT_IND).
 CREATE TABLE IF NOT EXISTS emulated.TWELVE_MON_DEF_WINDOW (
     OBSN_DT DATE NOT NULL,
