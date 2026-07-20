@@ -5,11 +5,11 @@ from bns.rrap.helpers.asset_event import (
     _push_asset_event_extras,
 )
 
-# MOR 12-month default-observation window (rewrite of RRAP_MOR_MODEL_02_BNS_MOR_PD_G.sas
-# create_pd_obs_window + last_new_default). Temporal feature: scans STATUS
-# (features.PIT_STATUS_CROSS_DEFAULT_ORIG, MOR) and balance (features.CURRENT_BAL, MOR)
-# history over [rundate-38mo, rundate], builds 13-month forward windows per obs-start and
-# detects the last CUR->DEF transition. No emulated.MORTGAGE_HIST / STATUS_FINAL needed.
+# MOR 12-month default-observation window (rewrite of RRAP_MOR_MODEL_02_BNS_MOR_PD_G.sas).
+# Scans STATUS (features.PIT_STATUS_CROSS_DEFAULT_ORIG, MOR) + balance (features.CURRENT_BAL, MOR)
+# over [rundate-38mo, rundate], builds 13-month forward windows per obs-start, detects the last
+# CUR->DEF transition. Batched by MOD(HASH(BASEL_ACCT_ID), 6) to bound peak memory
+# (the obs-window fan-out otherwise OOMs on the full MOR population).
 UPSTREAM_ASSET = [
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
     "features.CURRENT_BAL",
@@ -17,25 +17,39 @@ UPSTREAM_ASSET = [
 ]
 DOWNSTREAM_ASSET = "features.DEFAULT_BAL"
 DEPENDENCIES = {
-    "export_mor": ["duckdb_delete"],
-    "duckdb_delete": ["duckdb_load"],
+    "duckdb_delete": ["export_account_buckets"],
+    "export_account_buckets": ["export_mor_batch_1", "export_mor_batch_2", "export_mor_batch_3", "export_mor_batch_4", "export_mor_batch_5", "export_mor_batch_6"],
+    "export_mor_batch_1": ["duckdb_load"],
+    "export_mor_batch_2": ["duckdb_load"],
+    "export_mor_batch_3": ["duckdb_load"],
+    "export_mor_batch_4": ["duckdb_load"],
+    "export_mor_batch_5": ["duckdb_load"],
+    "export_mor_batch_6": ["duckdb_load"],
 }
 
 
-def export_mor(
-    duckdb_conn_id="duckdb-conn",
-    resource_tier="HIGH",
-    pool_slots=96,
-    sql=f"""
+RENDER_SQL = """
     WITH
         params AS (
-            SELECT DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS end_period
+            SELECT
+                DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' AS end_period,
+                REPLACE_COUNT AS batch_count,
+                REPLACE_ID AS batch_id
         ),
         periods AS (
             SELECT
                 p.end_period,
+                p.batch_count,
+                p.batch_id,
                 LAST_DAY(DATE_TRUNC('month', p.end_period) - INTERVAL 38 MONTH) AS start_period
             FROM params p
+        ),
+        batch_accounts AS MATERIALIZED (
+            SELECT B.BASEL_ACCT_ID
+            FROM '{{ task_instance.xcom_pull(task_ids="derived__default_bal.export_account_buckets", key="parquet") }}' B
+            CROSS JOIN params P
+            WHERE B.BATCH_COUNT = P.batch_count
+              AND B.BATCH_ID = P.batch_id
         ),
         obs_starts AS (
             SELECT tm.TM_ID AS obs_start_tm_id, tm.TM_LVL_END_DT AS obs_start
@@ -52,13 +66,14 @@ def export_mor(
                 pit.OBSN_DT AS process_date,
                 pit.OBSN_DT AS process_month_end
             FROM (
-                SELECT BASEL_ACCT_ID, OBSN_DT, PIT_STATUS_CROSS_DEFAULT_ORIG
-                FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG
-                WHERE SRC_SYS_CD = 'MOR'
-                  AND OBSN_DT BETWEEN (SELECT start_period FROM periods) AND (SELECT end_period FROM periods)
+                SELECT s.BASEL_ACCT_ID, s.OBSN_DT, s.PIT_STATUS_CROSS_DEFAULT_ORIG
+                FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG s
+                INNER JOIN batch_accounts ba ON s.BASEL_ACCT_ID = ba.BASEL_ACCT_ID
+                WHERE s.SRC_SYS_CD = 'MOR'
+                  AND s.OBSN_DT BETWEEN (SELECT start_period FROM periods) AND (SELECT end_period FROM periods)
                 QUALIFY ROW_NUMBER() OVER (
-                    PARTITION BY BASEL_ACCT_ID, OBSN_DT
-                    ORDER BY PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
+                    PARTITION BY s.BASEL_ACCT_ID, s.OBSN_DT
+                    ORDER BY s.PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
                 ) = 1
             ) pit
             LEFT JOIN (
@@ -67,21 +82,15 @@ def export_mor(
                 WHERE SRC_SYS_CD = 'MOR'
                   AND OBSN_DT BETWEEN (SELECT start_period FROM periods) AND (SELECT end_period FROM periods)
                 QUALIFY ROW_NUMBER() OVER (
-                    PARTITION BY BASEL_ACCT_ID, OBSN_DT
-                    ORDER BY CURRENT_BAL DESC NULLS LAST
+                    PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY CURRENT_BAL DESC NULLS LAST
                 ) = 1
             ) cb
-                ON cb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
-               AND cb.OBSN_DT = pit.OBSN_DT
+                ON cb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND cb.OBSN_DT = pit.OBSN_DT
         ),
         windowed AS (
             SELECT
-                h.BASEL_ACCT_ID,
-                h.STATUS,
-                h.CURRENT_BAL,
-                h.process_date,
-                os.obs_start,
-                os.obs_start_tm_id,
+                h.BASEL_ACCT_ID, h.STATUS, h.CURRENT_BAL, h.process_date,
+                os.obs_start, os.obs_start_tm_id,
                 LAST_DAY(DATE_TRUNC('month', os.obs_start) + INTERVAL 12 MONTH) AS window_end_dt
             FROM status_hist h
             INNER JOIN obs_starts os
@@ -89,12 +98,8 @@ def export_mor(
                AND h.process_month_end <= LAST_DAY(DATE_TRUNC('month', os.obs_start) + INTERVAL 12 MONTH)
         ),
         ranked AS (
-            SELECT
-                w.*,
-                ROW_NUMBER() OVER (
-                    PARTITION BY w.BASEL_ACCT_ID, w.obs_start
-                    ORDER BY w.process_date
-                ) AS slot
+            SELECT w.*,
+                ROW_NUMBER() OVER (PARTITION BY w.BASEL_ACCT_ID, w.obs_start ORDER BY w.process_date) AS slot
             FROM windowed w
         ),
         obs_window AS (
@@ -181,15 +186,89 @@ def export_mor(
             FROM obs_window ow
         )
     SELECT
-        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+        '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' AS OBSN_DT,
         BASEL_ACCT_ID,
         obs_start_tm_id AS OBSVTN_MTH_TM_ID,
         CASE WHEN _status1 = 'CUR' THEN COALESCE(default_bal, 0) END AS DEFAULT_BAL,
         'MOR' AS SRC_SYS_CD
     FROM with_default
+"""
+
+
+def export_account_buckets(
+    duckdb_conn_id="duckdb-conn",
+    sql=f"""
+    WITH periods AS (
+        SELECT
+            DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS end_period,
+            LAST_DAY(DATE_TRUNC('month', DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}') - INTERVAL 38 MONTH) AS start_period
+    )
+    SELECT DISTINCT
+        6 AS BATCH_COUNT,
+        MOD(HASH(s.BASEL_ACCT_ID), 6) AS BATCH_ID,
+        s.BASEL_ACCT_ID
+    FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG s
+    CROSS JOIN periods p
+    WHERE s.SRC_SYS_CD = 'MOR'
+      AND s.OBSN_DT BETWEEN p.start_period AND p.end_period
     """,
 ):
     pass
+
+
+def export_mor_batch_1(
+    duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "0"),
+):
+    pass
+
+
+def export_mor_batch_2(
+    duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "1"),
+):
+    pass
+
+
+def export_mor_batch_3(
+    duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "2"),
+):
+    pass
+
+
+def export_mor_batch_4(
+    duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "3"),
+):
+    pass
+
+
+def export_mor_batch_5(
+    duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "4"),
+):
+    pass
+
+
+def export_mor_batch_6(
+    duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
+    sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "5"),
+):
+    pass
+
 
 
 def duckdb_delete(
@@ -207,8 +286,13 @@ def duckdb_load(
     INSERT INTO {DOWNSTREAM_ASSET} by name
     FROM (
         select * from read_parquet([
-            '{{{{ task_instance.xcom_pull(task_ids="derived__default_bal.export_mor", key="parquet") }}}}'],
-        union_by_name = true)
+            '{{{{ task_instance.xcom_pull(task_ids="derived__default_bal.export_mor_batch_1", key="parquet") }}}}',
+            '{{{{ task_instance.xcom_pull(task_ids="derived__default_bal.export_mor_batch_2", key="parquet") }}}}',
+            '{{{{ task_instance.xcom_pull(task_ids="derived__default_bal.export_mor_batch_3", key="parquet") }}}}',
+            '{{{{ task_instance.xcom_pull(task_ids="derived__default_bal.export_mor_batch_4", key="parquet") }}}}',
+            '{{{{ task_instance.xcom_pull(task_ids="derived__default_bal.export_mor_batch_5", key="parquet") }}}}',
+            '{{{{ task_instance.xcom_pull(task_ids="derived__default_bal.export_mor_batch_6", key="parquet") }}}}'
+        ], union_by_name = true)
     )
     """,
 ):
