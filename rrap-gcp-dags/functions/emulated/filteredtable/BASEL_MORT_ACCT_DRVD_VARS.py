@@ -14,6 +14,10 @@ UPSTREAM_ASSET = [
 
 DOWNSTREAM_ASSET = "emulated.BASEL_MORT_ACCT_DRVD_VARS"
 
+_RUNDATE = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
+_STREAM = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}'
+_MTH_TM_ID = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}'
+
 DEPENDENCIES = {
     "duckdb_delete": ["duckdb_load"],
 }
@@ -23,13 +27,17 @@ def duckdb_delete(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
     DELETE FROM {DOWNSTREAM_ASSET}
-    WHERE OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-      AND STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
+    WHERE OBSN_DT = '{_RUNDATE}'
+      AND STREAM = '{_STREAM}'
     """,
 ):
     pass
 
 
+# Each feature/dim is pre-filtered to the run-month partition and deduped to one
+# row per BASEL_ACCT_ID BEFORE joining. This (a) forces DuckLake partition pruning
+# to the single OBSN_DT partition instead of scanning all backfilled months, and
+# (b) guarantees each LEFT JOIN is 1:1 so rows can't fan out across the 9 joins.
 def duckdb_load(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
@@ -39,17 +47,23 @@ def duckdb_load(
             a.MTH_TM_ID,
             a.BASEL_ACCT_ID,
             a.PRIM_BASEL_CUST_ID AS BASEL_CUST_ID,
-            TRIM(ba.ACCT_NUM) AS ACCT_NUM
+            ba.ACCT_NUM
         FROM ingestion.MORT_MTH_SNAPSHOT a
-        LEFT JOIN ingestion.BASEL_ACCT_DIM ba
-            ON a.BASEL_ACCT_ID = ba.BASEL_ACCT_ID
-           AND ba.SRC_APP_CD = 'MO'
-        WHERE a.MTH_TM_ID =
-            {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+        LEFT JOIN (
+            SELECT BASEL_ACCT_ID, TRIM(ACCT_NUM) AS ACCT_NUM
+            FROM ingestion.BASEL_ACCT_DIM
+            WHERE SRC_APP_CD = 'MO'
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY BASEL_ACCT_ID
+                ORDER BY CASE WHEN COALESCE(SRC_SYS_DEL_F, 'N') = 'Y' THEN 1 ELSE 0 END,
+                         ACCT_NUM DESC NULLS LAST
+            ) = 1
+        ) ba ON a.BASEL_ACCT_ID = ba.BASEL_ACCT_ID
+        WHERE a.MTH_TM_ID = {_MTH_TM_ID}
     )
     SELECT
-        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
-        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
+        '{_RUNDATE}' AS OBSN_DT,
+        '{_STREAM}' AS STREAM,
         base.MTH_TM_ID,
         base.BASEL_ACCT_ID,
         base.BASEL_CUST_ID,
@@ -70,40 +84,51 @@ def duckdb_load(
         CURRENT_TIMESTAMP AS INSRT_PROCESS_TMSTMP,
         CURRENT_TIMESTAMP AS UPDT_PROCESS_TMSTMP
     FROM base
-    LEFT JOIN features.COMM_TP_CD comm
-        ON comm.BASEL_ACCT_ID = base.BASEL_ACCT_ID
-       AND comm.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-    LEFT JOIN features.CONSM_PRD_TREATMNT_CD cons
-        ON cons.BASEL_ACCT_ID = base.BASEL_ACCT_ID
-       AND cons.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-       AND cons.SRC_SYS_CD = 'MOR'
-    LEFT JOIN features.DLQNT_DAY_CNT dday
-        ON dday.BASEL_ACCT_ID = base.BASEL_ACCT_ID
-       AND dday.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-       AND dday.SRC_SYS_CD = 'MO'
-    LEFT JOIN features.DLQNT_MTH_CNT dmth
-        ON dmth.BASEL_ACCT_ID = base.BASEL_ACCT_ID
-       AND dmth.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-       AND dmth.SRC_SYS_CD = 'MO'
-    LEFT JOIN features.LAND_RGSTRN_ACT_STAT_F land
-        ON land.BASEL_ACCT_ID = base.BASEL_ACCT_ID
-       AND land.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-    LEFT JOIN features.OS_BAL_AMT osb
-        ON osb.BASEL_ACCT_ID = base.BASEL_ACCT_ID
-       AND osb.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-       AND osb.SRC_SYS_CD = 'MOR'
-    LEFT JOIN features.PIT_STAT_VER_1_CD pit
-        ON pit.BASEL_ACCT_ID = base.BASEL_ACCT_ID
-       AND pit.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-       AND pit.SRC_SYS_CD = 'MOR'
-    LEFT JOIN features.STEP_FLAG step
-        ON step.BASEL_ACCT_ID = base.BASEL_ACCT_ID
-       AND step.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-       AND step.SRC_SYS_CD = 'MOR'
-    LEFT JOIN features.TRNST_EXCLSN_F_MORT trn
-        ON trn.BASEL_ACCT_ID = base.BASEL_ACCT_ID
-       AND trn.OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-       AND trn.SRC_SYS_CD = 'MOR'
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, COMM_TP_CD FROM features.COMM_TP_CD
+        WHERE OBSN_DT = '{_RUNDATE}'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY COMM_TP_CD DESC NULLS LAST) = 1
+    ) comm ON comm.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, CONSM_PRD_TREATMNT_CD FROM features.CONSM_PRD_TREATMNT_CD
+        WHERE OBSN_DT = '{_RUNDATE}' AND SRC_SYS_CD = 'MOR'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY CONSM_PRD_TREATMNT_CD DESC NULLS LAST) = 1
+    ) cons ON cons.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, DLQNT_DAY_CNT FROM features.DLQNT_DAY_CNT
+        WHERE OBSN_DT = '{_RUNDATE}' AND SRC_SYS_CD = 'MO'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY DLQNT_DAY_CNT DESC NULLS LAST) = 1
+    ) dday ON dday.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, DLQNT_MTH_CNT FROM features.DLQNT_MTH_CNT
+        WHERE OBSN_DT = '{_RUNDATE}' AND SRC_SYS_CD = 'MO'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY DLQNT_MTH_CNT DESC NULLS LAST) = 1
+    ) dmth ON dmth.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, LAND_RGSTRN_ACT_STAT_F FROM features.LAND_RGSTRN_ACT_STAT_F
+        WHERE OBSN_DT = '{_RUNDATE}'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY LAND_RGSTRN_ACT_STAT_F DESC NULLS LAST) = 1
+    ) land ON land.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OS_BAL_AMT FROM features.OS_BAL_AMT
+        WHERE OBSN_DT = '{_RUNDATE}' AND SRC_SYS_CD = 'MOR'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY OS_BAL_AMT DESC NULLS LAST) = 1
+    ) osb ON osb.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, PIT_STAT_VER_1_CD FROM features.PIT_STAT_VER_1_CD
+        WHERE OBSN_DT = '{_RUNDATE}' AND SRC_SYS_CD = 'MOR'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY PIT_STAT_VER_1_CD DESC NULLS LAST) = 1
+    ) pit ON pit.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, STEP_FLAG FROM features.STEP_FLAG
+        WHERE OBSN_DT = '{_RUNDATE}' AND SRC_SYS_CD = 'MOR'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY STEP_FLAG DESC NULLS LAST) = 1
+    ) step ON step.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, TRNST_EXCLSN_F_MORT FROM features.TRNST_EXCLSN_F_MORT
+        WHERE OBSN_DT = '{_RUNDATE}' AND SRC_SYS_CD = 'MOR'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY TRNST_EXCLSN_F_MORT DESC NULLS LAST) = 1
+    ) trn ON trn.BASEL_ACCT_ID = base.BASEL_ACCT_ID
     """,
 ):
     pass
