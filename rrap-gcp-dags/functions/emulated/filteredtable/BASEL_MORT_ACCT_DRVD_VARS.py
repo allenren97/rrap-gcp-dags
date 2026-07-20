@@ -28,38 +28,51 @@ def duckdb_delete(
     pass
 
 
+# Base + each feature are deduped to one row per BASEL_ACCT_ID before joining, so
+# the LEFT JOINs stay 1:1 (a duplicate row in any source would otherwise fan the
+# output out).
 def duckdb_load(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
     INSERT INTO {DOWNSTREAM_ASSET} BY NAME
+    WITH base AS (
+        SELECT MTH_TM_ID, BASEL_ACCT_ID
+        FROM ingestion.MORT_MTH_SNAPSHOT
+        WHERE MTH_TM_ID = {_MTH_TM_ID}
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY MTH_TM_ID) = 1
+    )
     SELECT
         '{_RUNDATE}' AS OBSN_DT,
         '{_STREAM}' AS STREAM,
-        a.MTH_TM_ID,
-        a.BASEL_ACCT_ID,
+        base.MTH_TM_ID,
+        base.BASEL_ACCT_ID,
         comm.COMM_TP_CD,
         cons.CONSM_PRD_TREATMNT_CD,
         dday.DLQNT_DAY_CNT,
         osb.OS_BAL_AMT,
         CURRENT_TIMESTAMP AS INSRT_PROCESS_TMSTMP,
         CURRENT_TIMESTAMP AS UPDT_PROCESS_TMSTMP
-    FROM ingestion.MORT_MTH_SNAPSHOT a
-    LEFT JOIN features.COMM_TP_CD comm
-        ON comm.BASEL_ACCT_ID = a.BASEL_ACCT_ID
-       AND comm.OBSN_DT = '{_RUNDATE}'
-    LEFT JOIN features.CONSM_PRD_TREATMNT_CD cons
-        ON cons.BASEL_ACCT_ID = a.BASEL_ACCT_ID
-       AND cons.OBSN_DT = '{_RUNDATE}'
-       AND cons.SRC_SYS_CD = 'MOR'
-    LEFT JOIN features.DLQNT_DAY_CNT dday
-        ON dday.BASEL_ACCT_ID = a.BASEL_ACCT_ID
-       AND dday.OBSN_DT = '{_RUNDATE}'
-       AND dday.SRC_SYS_CD = 'MO'
-    LEFT JOIN features.OS_BAL_AMT osb
-        ON osb.BASEL_ACCT_ID = a.BASEL_ACCT_ID
-       AND osb.OBSN_DT = '{_RUNDATE}'
-       AND osb.SRC_SYS_CD = 'MOR'
-    WHERE a.MTH_TM_ID = {_MTH_TM_ID}
+    FROM base
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, COMM_TP_CD FROM features.COMM_TP_CD
+        WHERE OBSN_DT = '{_RUNDATE}'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY COMM_TP_CD DESC NULLS LAST) = 1
+    ) comm ON comm.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, CONSM_PRD_TREATMNT_CD FROM features.CONSM_PRD_TREATMNT_CD
+        WHERE OBSN_DT = '{_RUNDATE}' AND SRC_SYS_CD = 'MOR'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY CONSM_PRD_TREATMNT_CD DESC NULLS LAST) = 1
+    ) cons ON cons.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, DLQNT_DAY_CNT FROM features.DLQNT_DAY_CNT
+        WHERE OBSN_DT = '{_RUNDATE}' AND SRC_SYS_CD = 'MO'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY DLQNT_DAY_CNT DESC NULLS LAST) = 1
+    ) dday ON dday.BASEL_ACCT_ID = base.BASEL_ACCT_ID
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OS_BAL_AMT FROM features.OS_BAL_AMT
+        WHERE OBSN_DT = '{_RUNDATE}' AND SRC_SYS_CD = 'MOR'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID ORDER BY OS_BAL_AMT DESC NULLS LAST) = 1
+    ) osb ON osb.BASEL_ACCT_ID = base.BASEL_ACCT_ID
     """,
 ):
     pass
