@@ -6,6 +6,9 @@ Only the columns that exist in the GENERATED file are compared (columns you
 skipped are ignored). Rows are aligned by a key you supply (--keys); for each
 shared column the tool reports how many values match, as a percentage.
 
+Pure DuckDB + Python stdlib — no pandas / numpy required. All comparison work
+is pushed into DuckDB SQL, so it scales to large files (aggregated in-engine).
+
 Usage
 -----
     python compare_parquet.py \
@@ -16,9 +19,9 @@ Usage
 Common options
 --------------
     --keys COL[,COL...]     Join key(s) that identify a row on both sides.
-                            If omitted, rows are compared by position (order),
-                            which is only meaningful if both files are sorted
-                            identically -- keys are strongly recommended.
+                            If omitted, rows are compared by scan position
+                            (only meaningful if both files are ordered
+                            identically -- keys are strongly recommended).
     --atol 0.01             Absolute tolerance for numeric columns (e.g. cents).
     --rtol 0.0              Relative tolerance for numeric columns.
     --trim-strings          Strip surrounding whitespace before comparing text.
@@ -30,10 +33,16 @@ Common options
     --out-mismatches m.pq   Write mismatching rows (keys + both values) to parquet.
 """
 import argparse
+import csv
 import sys
 
 import duckdb
-import pandas as pd
+
+NUMERIC_PREFIXES = (
+    "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
+    "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT",
+    "FLOAT", "DOUBLE", "REAL", "DECIMAL", "NUMERIC",
+)
 
 
 def parse_args():
@@ -57,70 +66,73 @@ def csv_list(s):
     return [c.strip() for c in s.split(",") if c.strip()]
 
 
-def schema_cols(path):
-    return duckdb.sql("SELECT * FROM read_parquet(?) LIMIT 0", params=[path]).columns
+def qi(name):
+    """Quote an identifier."""
+    return '"' + name.replace('"', '""') + '"'
 
 
-def load_parquet(path, columns):
-    cols = ", ".join(f'"{c}"' for c in columns)
-    return duckdb.sql(f"SELECT {cols} FROM read_parquet(?)", params=[path]).df()
+def sql_str(s):
+    """Quote a string literal."""
+    return "'" + s.replace("'", "''") + "'"
 
 
-def write_parquet(df, path):
-    duckdb.register("_out_df", df)
-    duckdb.sql(f"COPY _out_df TO '{path}' (FORMAT PARQUET)")
-    duckdb.unregister("_out_df")
+def is_numeric(type_str):
+    return type_str.upper().startswith(NUMERIC_PREFIXES)
 
 
-def is_numeric(s):
-    return pd.api.types.is_numeric_dtype(s) and not pd.api.types.is_bool_dtype(s)
+def schema(con, path):
+    """Ordered {column_name: column_type} for a parquet path."""
+    info = con.execute(f"DESCRIBE SELECT * FROM read_parquet({sql_str(path)})").fetchall()
+    return {r[0]: r[1] for r in info}
 
 
-def norm_text(s, trim, ci):
-    out = s.astype("string")
+def row_count(con, path):
+    return con.execute(f"SELECT count(*) FROM read_parquet({sql_str(path)})").fetchone()[0]
+
+
+def norm_text(expr, trim, ci):
+    e = f"CAST({expr} AS VARCHAR)"
     if trim:
-        out = out.str.strip()
+        e = f"trim({e})"
     if ci:
-        out = out.str.upper()
-    return out
+        e = f"upper({e})"
+    return e
 
 
-def compare_column(prod_s, gen_s, atol, rtol, trim, ci):
-    """Return a boolean Series (aligned to the input index): True where the two
-    values are considered equal. NULL == NULL is a match; NULL vs value is a
-    mismatch."""
-    both_null = prod_s.isna() & gen_s.isna()
+def match_expr(col, both_numeric, atol, rtol, trim, ci):
+    """Boolean SQL: TRUE when prod/gen values are equal (or both NULL)."""
+    pa, ga = qi(f"p_{col}"), qi(f"g_{col}")
+    both_null = f"({pa} IS NULL AND {ga} IS NULL)"
+    if both_numeric:
+        cond = f"abs({pa} - {ga}) <= ({atol} + {rtol} * abs({ga}))"
+    else:
+        cond = f"{norm_text(pa, trim, ci)} = {norm_text(ga, trim, ci)}"
+    return f"({both_null} OR COALESCE({cond}, FALSE))", both_null
 
-    if is_numeric(prod_s) and is_numeric(gen_s):
-        a = pd.to_numeric(prod_s, errors="coerce")
-        b = pd.to_numeric(gen_s, errors="coerce")
-        # np.isclose formula without numpy; NaN comparisons yield False.
-        close = (a - b).abs() <= (atol + rtol * b.abs())
-        return (close | both_null).fillna(False).astype(bool)
 
-    # datetime columns -> compare as timestamps
-    if pd.api.types.is_datetime64_any_dtype(prod_s) and pd.api.types.is_datetime64_any_dtype(gen_s):
-        eq = prod_s.eq(gen_s)
-        return (eq | both_null).fillna(False).astype(bool)
-
-    # fall back to normalized text comparison
-    a = norm_text(prod_s, trim, ci)
-    b = norm_text(gen_s, trim, ci)
-    eq = a.eq(b).fillna(False)  # pd.NA (one side null) -> not equal
-    return (eq | both_null).fillna(False).astype(bool)
+def print_table(rows, cols, right_align):
+    widths = {c: max(len(c), max((len(str(r[c])) for r in rows), default=0)) for c in cols}
+    def fmt(val, c):
+        s = str(val)
+        return s.rjust(widths[c]) if c in right_align else s.ljust(widths[c])
+    print("  ".join(fmt(c, c) for c in cols))
+    for r in rows:
+        print("  ".join(fmt(r[c], c) for c in cols))
 
 
 def main():
     args = parse_args()
     keys = csv_list(args.keys)
+    con = duckdb.connect()
 
-    prod_cols = schema_cols(args.prod)
-    gen_cols = schema_cols(args.gen)
+    prod_types = schema(con, args.prod)
+    gen_types = schema(con, args.gen)
+    prod_cols, gen_cols = list(prod_types), list(gen_types)
 
-    # Only compare columns present in the GENERATED file.
     only = set(csv_list(args.columns))
     ignore = set(csv_list(args.ignore_columns))
 
+    # Only compare columns present in the GENERATED file.
     comparable = [c for c in gen_cols if c in prod_cols and c not in keys]
     if only:
         comparable = [c for c in comparable if c in only]
@@ -135,113 +147,168 @@ def main():
     if not comparable:
         sys.exit("ERROR: no shared columns to compare (check --keys/--columns).")
 
-    load_cols = keys + comparable
-    prod = load_parquet(args.prod, load_cols)
-    gen = load_parquet(args.gen, load_cols)
+    n_prod, n_gen = row_count(con, args.prod), row_count(con, args.gen)
 
     print("=" * 72)
     print("PARQUET COMPARISON")
     print("=" * 72)
     print(f"  production : {args.prod}")
-    print(f"               {len(prod):,} rows, {len(prod_cols)} columns")
+    print(f"               {n_prod:,} rows, {len(prod_cols)} columns")
     print(f"  generated  : {args.gen}")
-    print(f"               {len(gen):,} rows, {len(gen_cols)} columns")
-    print(f"  comparing  : {len(comparable)} shared column(s) on key {keys or '(row order)'}")
+    print(f"               {n_gen:,} rows, {len(gen_cols)} columns")
+    print(f"  comparing  : {len(comparable)} shared column(s) on key {keys or '(scan position)'}")
     if gen_only:
         print(f"  NOTE: {len(gen_only)} generated column(s) not in production (skipped): {gen_only}")
     if prod_skipped:
         print(f"  NOTE: {len(prod_skipped)} production column(s) you did not generate: {prod_skipped}")
 
-    # ---- align rows -------------------------------------------------------
+    # ---- build the aligned join as a temp table ---------------------------
     if keys:
-        for name, df in (("production", prod), ("generated", gen)):
-            dups = df.duplicated(subset=keys).sum()
-            if dups:
-                print(f"  WARNING: {dups:,} duplicate key rows in {name}; keeping first of each.")
-                df.drop_duplicates(subset=keys, keep="first", inplace=True)
-        merged = prod.merge(gen, on=keys, how="outer", suffixes=("__prod", "__gen"), indicator=True)
-        only_prod = int((merged["_merge"] == "left_only").sum())
-        only_gen = int((merged["_merge"] == "right_only").sum())
-        matched = merged[merged["_merge"] == "both"].copy()
-        print(f"\n  row alignment: {len(matched):,} matched | "
-              f"{only_prod:,} only in prod | {only_gen:,} only in gen")
+        join_keys = keys
+        key_sel = ", ".join(qi(k) for k in keys)
+        dedup = f"QUALIFY row_number() OVER (PARTITION BY {key_sel}) = 1"
     else:
-        n = min(len(prod), len(gen))
-        if len(prod) != len(gen):
-            print(f"  WARNING: row counts differ ({len(prod):,} vs {len(gen):,}); "
-                  f"comparing first {n:,} by position.")
-        matched = pd.concat(
-            [prod.head(n).add_suffix("__prod").reset_index(drop=True),
-             gen.head(n).add_suffix("__gen").reset_index(drop=True)],
-            axis=1,
-        )
-        only_prod = len(prod) - n
-        only_gen = len(gen) - n
+        join_keys = ["_rn"]
+        key_sel = "row_number() OVER () AS _rn"
+        dedup = ""
 
-    n_rows = len(matched)
-    if n_rows == 0:
+    p_cols = ", ".join(f"{qi(c)} AS {qi('p_' + c)}" for c in comparable)
+    g_cols = ", ".join(f"{qi(c)} AS {qi('g_' + c)}" for c in comparable)
+    using = ", ".join(qi(k) for k in join_keys)
+
+    con.execute(f"""
+        CREATE TEMP TABLE _joined AS
+        WITH p AS (
+            SELECT {key_sel}, {p_cols}, 1 AS _p_present
+            FROM read_parquet({sql_str(args.prod)}) {dedup}
+        ),
+        g AS (
+            SELECT {key_sel}, {g_cols}, 1 AS _g_present
+            FROM read_parquet({sql_str(args.gen)}) {dedup}
+        )
+        SELECT * FROM p FULL OUTER JOIN g USING ({using})
+    """)
+
+    if keys:
+        for label, path in (("production", args.prod), ("generated", args.gen)):
+            total = row_count(con, path)
+            distinct = con.execute(
+                f"SELECT count(*) FROM (SELECT DISTINCT {key_sel} FROM read_parquet({sql_str(path)}))"
+            ).fetchone()[0]
+            if total != distinct:
+                print(f"  WARNING: {total - distinct:,} duplicate-key rows in {label}; "
+                      f"kept first of each (add more --keys to avoid).")
+
+    both_present = "(_p_present IS NOT NULL AND _g_present IS NOT NULL)"
+    p_only = "(_p_present IS NOT NULL AND _g_present IS NULL)"
+    g_only = "(_g_present IS NOT NULL AND _p_present IS NULL)"
+
+    # ---- one aggregate pass over the join --------------------------------
+    labels, exprs, match_sql = [], [], {}
+    def add(label, expr):
+        labels.append(label)
+        exprs.append(f"{expr} AS {qi(label)}")
+
+    add("matched_rows", f"COUNT(*) FILTER (WHERE {both_present})")
+    add("only_prod", f"COUNT(*) FILTER (WHERE {p_only})")
+    add("only_gen", f"COUNT(*) FILTER (WHERE {g_only})")
+    for col in comparable:
+        both_num = is_numeric(prod_types[col]) and is_numeric(gen_types[col])
+        m, both_null = match_expr(col, both_num, args.atol, args.rtol, args.trim_strings, args.ci_strings)
+        match_sql[col] = m
+        add(f"m__{col}", f"COUNT(*) FILTER (WHERE {both_present} AND ({m}))")
+        add(f"bn__{col}", f"COUNT(*) FILTER (WHERE {both_present} AND ({both_null}))")
+    fully = " AND ".join(f"({m})" for m in match_sql.values())
+    add("fully_match", f"COUNT(*) FILTER (WHERE {both_present} AND {fully})")
+
+    vals = dict(zip(labels, con.execute(f"SELECT {', '.join(exprs)} FROM _joined").fetchone()))
+
+    matched = vals["matched_rows"]
+    print(f"\n  row alignment: {matched:,} matched | "
+          f"{vals['only_prod']:,} only in prod | {vals['only_gen']:,} only in gen")
+    if matched == 0:
         sys.exit("ERROR: no overlapping rows to compare.")
 
-    # ---- per-column comparison -------------------------------------------
-    rows = []
-    all_match_mask = pd.Series(True, index=matched.index)
-    mismatch_frames = []
+    # ---- per-column benchmark --------------------------------------------
+    report = []
     for col in comparable:
-        ps = matched[f"{col}__prod"]
-        gs = matched[f"{col}__gen"]
-        eq = compare_column(ps, gs, args.atol, args.rtol, args.trim_strings, args.ci_strings)
-        all_match_mask &= eq
-
-        n_match = int(eq.sum())
-        n_mis = n_rows - n_match
-        both_null = int((ps.isna() & gs.isna()).sum())
-        rows.append({
+        m = vals[f"m__{col}"]
+        report.append({
             "column": col,
-            "prod_dtype": str(ps.dtype),
-            "gen_dtype": str(gs.dtype),
-            "rows": n_rows,
-            "match": n_match,
-            "mismatch": n_mis,
-            "both_null": both_null,
-            "match_pct": round(100.0 * n_match / n_rows, 4),
+            "prod_dtype": prod_types[col],
+            "gen_dtype": gen_types[col],
+            "rows": matched,
+            "match": m,
+            "mismatch": matched - m,
+            "both_null": vals[f"bn__{col}"],
+            "match_pct": round(100.0 * m / matched, 4),
         })
-
-        if n_mis and (args.sample or args.out_mismatches):
-            bad = matched.loc[~eq, (keys + [f"{col}__prod", f"{col}__gen"])].copy()
-            if args.sample:
-                print(f"\n  ── mismatches in {col} (showing {min(args.sample, len(bad))} of {len(bad):,}) ──")
-                print(bad.head(args.sample).to_string(index=False))
-            if args.out_mismatches:
-                b = bad.rename(columns={f"{col}__prod": "prod_value", f"{col}__gen": "gen_value"})
-                b.insert(len(keys), "column", col)
-                mismatch_frames.append(b)
-
-    report = pd.DataFrame(rows).sort_values("match_pct")
+    report.sort(key=lambda r: r["match_pct"])
 
     print("\n" + "=" * 72)
     print("PER-COLUMN BENCHMARK  (sorted worst-first)")
     print("=" * 72)
-    print(report.to_string(index=False))
+    print_table(report,
+                ["column", "prod_dtype", "gen_dtype", "rows", "match", "mismatch", "both_null", "match_pct"],
+                right_align={"rows", "match", "mismatch", "both_null", "match_pct"})
 
-    total_cells = n_rows * len(comparable)
-    total_match = int(report["match"].sum())
-    rows_all_match = int(all_match_mask.sum())
+    total_cells = matched * len(comparable)
+    total_match = sum(r["match"] for r in report)
     print("\n" + "-" * 72)
     print(f"  OVERALL cell match : {total_match:,}/{total_cells:,} "
           f"= {100.0 * total_match / total_cells:.4f}%")
-    print(f"  Fully-matching rows: {rows_all_match:,}/{n_rows:,} "
-          f"= {100.0 * rows_all_match / n_rows:.4f}%  (all compared columns equal)")
-    if keys:
-        print(f"  Key coverage       : {n_rows:,} matched, "
-              f"{only_prod:,} missing from gen, {only_gen:,} extra in gen")
+    print(f"  Fully-matching rows: {vals['fully_match']:,}/{matched:,} "
+          f"= {100.0 * vals['fully_match'] / matched:.4f}%  (all compared columns equal)")
+    print(f"  Key coverage       : {matched:,} matched, "
+          f"{vals['only_prod']:,} missing from gen, {vals['only_gen']:,} extra in gen")
     print("-" * 72)
 
-    if args.out_csv:
-        report.to_csv(args.out_csv, index=False)
-        print(f"  wrote per-column benchmark -> {args.out_csv}")
-    if args.out_mismatches and mismatch_frames:
-        write_parquet(pd.concat(mismatch_frames, ignore_index=True), args.out_mismatches)
+    # ---- optional: sample mismatches per column --------------------------
+    if args.sample:
+        key_show = ", ".join(qi(k) for k in join_keys)
+        for col in comparable:
+            if report_lookup(report, col)["mismatch"] == 0:
+                continue
+            rows = con.execute(f"""
+                SELECT {key_show}, {qi('p_' + col)} AS prod_value, {qi('g_' + col)} AS gen_value
+                FROM _joined
+                WHERE {both_present} AND NOT ({match_sql[col]})
+                LIMIT {args.sample}
+            """).fetchall()
+            cols = list(join_keys) + ["prod_value", "gen_value"]
+            print(f"\n  ── mismatches in {col} (showing {len(rows)}) ──")
+            print_table([dict(zip(cols, r)) for r in rows], cols, right_align=set())
+
+    # ---- optional: dump all mismatching rows -----------------------------
+    if args.out_mismatches:
+        key_show = ", ".join(qi(k) for k in join_keys)
+        parts = [
+            f"""SELECT {key_show}, {sql_str(col)} AS column,
+                       CAST({qi('p_' + col)} AS VARCHAR) AS prod_value,
+                       CAST({qi('g_' + col)} AS VARCHAR) AS gen_value
+                FROM _joined
+                WHERE {both_present} AND NOT ({match_sql[col]})"""
+            for col in comparable
+        ]
+        con.execute(
+            f"COPY ({' UNION ALL '.join(parts)}) TO {sql_str(args.out_mismatches)} (FORMAT PARQUET)"
+        )
         print(f"  wrote mismatching rows      -> {args.out_mismatches}")
+
+    # ---- optional: CSV benchmark -----------------------------------------
+    if args.out_csv:
+        with open(args.out_csv, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(report[0].keys()))
+            w.writeheader()
+            w.writerows(report)
+        print(f"  wrote per-column benchmark  -> {args.out_csv}")
+
+
+def report_lookup(report, col):
+    for r in report:
+        if r["column"] == col:
+            return r
+    return {"mismatch": 0}
 
 
 if __name__ == "__main__":
