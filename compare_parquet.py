@@ -33,7 +33,6 @@ import argparse
 import sys
 
 import duckdb
-import numpy as np
 import pandas as pd
 
 
@@ -87,27 +86,28 @@ def norm_text(s, trim, ci):
 
 
 def compare_column(prod_s, gen_s, atol, rtol, trim, ci):
-    """Return a boolean Series: True where the two values are considered equal.
-    NULL == NULL is treated as a match; NULL vs value is a mismatch."""
-    both_null = prod_s.isna().values & gen_s.isna().values
+    """Return a boolean Series (aligned to the input index): True where the two
+    values are considered equal. NULL == NULL is a match; NULL vs value is a
+    mismatch."""
+    both_null = prod_s.isna() & gen_s.isna()
 
     if is_numeric(prod_s) and is_numeric(gen_s):
-        a = pd.to_numeric(prod_s, errors="coerce").to_numpy(dtype="float64")
-        b = pd.to_numeric(gen_s, errors="coerce").to_numpy(dtype="float64")
-        with np.errstate(invalid="ignore"):
-            close = np.isclose(a, b, atol=atol, rtol=rtol, equal_nan=False)
-        return close | both_null
+        a = pd.to_numeric(prod_s, errors="coerce")
+        b = pd.to_numeric(gen_s, errors="coerce")
+        # np.isclose formula without numpy; NaN comparisons yield False.
+        close = (a - b).abs() <= (atol + rtol * b.abs())
+        return (close | both_null).fillna(False).astype(bool)
 
     # datetime columns -> compare as timestamps
     if pd.api.types.is_datetime64_any_dtype(prod_s) and pd.api.types.is_datetime64_any_dtype(gen_s):
-        eq = (prod_s.values == gen_s.values)
-        return eq | both_null
+        eq = prod_s.eq(gen_s)
+        return (eq | both_null).fillna(False).astype(bool)
 
     # fall back to normalized text comparison
     a = norm_text(prod_s, trim, ci)
     b = norm_text(gen_s, trim, ci)
-    eq = (a.values == b.values)
-    return eq | both_null
+    eq = a.eq(b).fillna(False)  # pd.NA (one side null) -> not equal
+    return (eq | both_null).fillna(False).astype(bool)
 
 
 def main():
@@ -184,18 +184,17 @@ def main():
 
     # ---- per-column comparison -------------------------------------------
     rows = []
-    all_match_mask = np.ones(n_rows, dtype=bool)
+    all_match_mask = pd.Series(True, index=matched.index)
     mismatch_frames = []
     for col in comparable:
         ps = matched[f"{col}__prod"]
         gs = matched[f"{col}__gen"]
         eq = compare_column(ps, gs, args.atol, args.rtol, args.trim_strings, args.ci_strings)
-        eq = np.asarray(eq, dtype=bool)
         all_match_mask &= eq
 
         n_match = int(eq.sum())
         n_mis = n_rows - n_match
-        both_null = int((ps.isna().values & gs.isna().values).sum())
+        both_null = int((ps.isna() & gs.isna()).sum())
         rows.append({
             "column": col,
             "prod_dtype": str(ps.dtype),
