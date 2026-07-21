@@ -43,9 +43,7 @@ def duckdb_load(
     SELECT
         DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
-        {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} AS MTH_TM_ID,
         TRY_CAST(mn.MORT_NUM AS BIGINT) AS MORTGAGE_NO,
-        ind.OBSVTN_MTH_TM_ID,
         obs.TM_LVL_END_DT AS PROCESS_DATE,
         dt.DEFAULT_DATE,
         bal.DEFAULT_BAL,
