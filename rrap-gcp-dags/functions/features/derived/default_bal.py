@@ -41,7 +41,12 @@ RENDER_SQL = """
                 p.end_period,
                 p.batch_count,
                 p.batch_id,
-                LAST_DAY(DATE_TRUNC('month', p.end_period) - INTERVAL 38 MONTH) AS start_period
+                LAST_DAY(DATE_TRUNC('month', p.end_period) - INTERVAL 38 MONTH) AS start_period,
+                -- Forward horizon: the obs-start = end_period window looks 12 months
+                -- ahead, so the status/balance scan must reach end_period+12 (SAS
+                -- scans full status_final history with no upper bound). Without this,
+                -- recent obs-windows truncate at rundate and DEFAULT_* come out NULL.
+                LAST_DAY(DATE_TRUNC('month', p.end_period) + INTERVAL 12 MONTH) AS forward_end
             FROM params p
         ),
         batch_accounts AS MATERIALIZED (
@@ -70,7 +75,7 @@ RENDER_SQL = """
                 FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG s
                 INNER JOIN batch_accounts ba ON s.BASEL_ACCT_ID = ba.BASEL_ACCT_ID
                 WHERE s.SRC_SYS_CD = 'MOR'
-                  AND s.OBSN_DT BETWEEN (SELECT start_period FROM periods) AND (SELECT end_period FROM periods)
+                  AND s.OBSN_DT BETWEEN (SELECT start_period FROM periods) AND (SELECT forward_end FROM periods)
                 QUALIFY ROW_NUMBER() OVER (
                     PARTITION BY s.BASEL_ACCT_ID, s.OBSN_DT
                     ORDER BY s.PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
@@ -80,7 +85,7 @@ RENDER_SQL = """
                 SELECT BASEL_ACCT_ID, OBSN_DT, CURRENT_BAL
                 FROM features.CURRENT_BAL
                 WHERE SRC_SYS_CD = 'MOR'
-                  AND OBSN_DT BETWEEN (SELECT start_period FROM periods) AND (SELECT end_period FROM periods)
+                  AND OBSN_DT BETWEEN (SELECT start_period FROM periods) AND (SELECT forward_end FROM periods)
                 QUALIFY ROW_NUMBER() OVER (
                     PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY CURRENT_BAL DESC NULLS LAST
                 ) = 1
