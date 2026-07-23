@@ -168,18 +168,26 @@ def export_gather(
     LEFT JOIN ingestion.BASEL_MORT_MTH_SNAPSHOT h
         ON b.BASEL_ACCT_ID = h.BASEL_ACCT_ID
        AND h.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
-    -- Obsvtn-point tables: the emulated producers stamp OBSVTN_MTH_TM_ID = R-12
-    -- (the observation month) and PROCESS_MTH_TM_ID = R (the run month). The SAS
-    -- keys on OBSVTN_MTH_TM_ID = &tm_id because production reads month M's row from
-    -- the run at R = M+12; in this same-month pipeline the row for run month R is the
-    -- one we just produced, so we join on PROCESS_MTH_TM_ID = mth_tm_id instead.
+    -- Obsvtn-point tables: for run R the emulated producers emit TWO rows per account
+    -- (UNION ALL of the PDEAD and LGD cohorts), both stamped PROCESS_MTH_TM_ID = R but
+    -- with different OBSVTN_MTH_TM_ID:
+    --   PDEAD  OBSVTN_MTH_TM_ID = R - 12*40  (R-12 months) -- the custuniv cohort
+    --   LGD    OBSVTN_MTH_TM_ID = R - 24*40  (R-24 months)
+    -- The SAS keys on OBSVTN_MTH_TM_ID = &tm_id because production reads reporting
+    -- month M's row from the run at R = M+12 (whose PDEAD OBSVTN = R-12 = M). In this
+    -- same-month pipeline the row for run month R is the one we just produced, so we
+    -- pin PROCESS_MTH_TM_ID = mth_tm_id (this run) AND select the PDEAD window
+    -- OBSVTN_MTH_TM_ID = mth_tm_id - 12*40 -- without the window filter the LGD row
+    -- would fan the join out (and a future R+12 run's LGD row shares OBSVTN = R-12).
     LEFT JOIN emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR i
         ON b.BASEL_ACCT_ID = i.BASEL_ACCT_ID
        AND i.PROCESS_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+       AND i.OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 12 * 40
        AND i.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     LEFT JOIN emulated.PSNL_LOAN_OBSVTN_PT_DRVD_VAR j
         ON b.BASEL_ACCT_ID = j.BASEL_ACCT_ID
        AND j.PROCESS_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+       AND j.OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 12 * 40
        AND j.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     LEFT JOIN emulated.STATUS_FINAL k
         ON TRY_CAST(h.MORT_NUM AS BIGINT) = k.MORTGAGE_NO
