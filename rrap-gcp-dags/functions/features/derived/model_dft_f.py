@@ -128,6 +128,7 @@ def export_account_buckets(
         BASEL_ACCT_ID
     FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG
     WHERE SRC_SYS_CD = 'KS'
+      AND TRIM(PIT_STATUS_CROSS_DEFAULT_ORIG) IN ('DEF', 'CHG')
       AND OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 49 MONTH) AND DATE '{_RUNDATE}'
     """,
 ):
@@ -155,19 +156,26 @@ RENDER_KS = """
         INNER JOIN ingestion.TM_DIM tm
             ON tm.TM_LVL_END_DT = pit.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
         LEFT JOIN (
-            SELECT BASEL_ACCT_ID, OBSN_DT, OS_BAL_AMT FROM features.OS_BAL_AMT
-            WHERE SRC_SYS_CD = 'KS'
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY OS_BAL_AMT DESC NULLS LAST) = 1
+            SELECT s.BASEL_ACCT_ID, s.OBSN_DT, s.OS_BAL_AMT FROM features.OS_BAL_AMT s
+            INNER JOIN batch_accounts bacc ON bacc.BASEL_ACCT_ID = s.BASEL_ACCT_ID
+            WHERE s.SRC_SYS_CD = 'KS'
+              AND s.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY s.BASEL_ACCT_ID, s.OBSN_DT ORDER BY s.OS_BAL_AMT DESC NULLS LAST) = 1
         ) osb ON osb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND osb.OBSN_DT = pit.OBSN_DT
         LEFT JOIN ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT snp
             ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND snp.MTH_TM_ID = tm.TM_ID
+           AND snp.MTH_TM_ID BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 49 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}
         LEFT JOIN (
-            SELECT BASEL_ACCT_ID, OBSN_DT, BASEL_PRD_CD FROM features.BASEL_PRD_CD
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY BASEL_PRD_CD DESC NULLS LAST) = 1
+            SELECT s.BASEL_ACCT_ID, s.OBSN_DT, s.BASEL_PRD_CD FROM features.BASEL_PRD_CD s
+            INNER JOIN batch_accounts bacc ON bacc.BASEL_ACCT_ID = s.BASEL_ACCT_ID
+            WHERE s.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY s.BASEL_ACCT_ID, s.OBSN_DT ORDER BY s.BASEL_PRD_CD DESC NULLS LAST) = 1
         ) prd ON prd.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND prd.OBSN_DT = pit.OBSN_DT
         LEFT JOIN (
-            SELECT BASEL_ACCT_ID, OBSN_DT, HELOC_F FROM features.HELOC_F
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY HELOC_F DESC NULLS LAST) = 1
+            SELECT s.BASEL_ACCT_ID, s.OBSN_DT, s.HELOC_F FROM features.HELOC_F s
+            INNER JOIN batch_accounts bacc ON bacc.BASEL_ACCT_ID = s.BASEL_ACCT_ID
+            WHERE s.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY s.BASEL_ACCT_ID, s.OBSN_DT ORDER BY s.HELOC_F DESC NULLS LAST) = 1
         ) hel ON hel.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND hel.OBSN_DT = pit.OBSN_DT
         WHERE pit.SRC_SYS_CD = 'KS'
           AND pit.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
