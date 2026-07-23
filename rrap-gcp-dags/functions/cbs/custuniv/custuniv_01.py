@@ -168,13 +168,18 @@ def export_gather(
     LEFT JOIN ingestion.BASEL_MORT_MTH_SNAPSHOT h
         ON b.BASEL_ACCT_ID = h.BASEL_ACCT_ID
        AND h.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+    -- Obsvtn-point tables: the emulated producers stamp OBSVTN_MTH_TM_ID = R-12
+    -- (the observation month) and PROCESS_MTH_TM_ID = R (the run month). The SAS
+    -- keys on OBSVTN_MTH_TM_ID = &tm_id because production reads month M's row from
+    -- the run at R = M+12; in this same-month pipeline the row for run month R is the
+    -- one we just produced, so we join on PROCESS_MTH_TM_ID = mth_tm_id instead.
     LEFT JOIN emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR i
         ON b.BASEL_ACCT_ID = i.BASEL_ACCT_ID
-       AND i.OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+       AND i.PROCESS_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
        AND i.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     LEFT JOIN emulated.PSNL_LOAN_OBSVTN_PT_DRVD_VAR j
         ON b.BASEL_ACCT_ID = j.BASEL_ACCT_ID
-       AND j.OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+       AND j.PROCESS_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
        AND j.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     LEFT JOIN emulated.STATUS_FINAL k
         ON TRY_CAST(h.MORT_NUM AS BIGINT) = k.MORTGAGE_NO
@@ -246,7 +251,7 @@ def export_result(
             SELECT
                 d1.*,
                 CASE
-                    WHEN product IN {_REV_PRODUCTS} AND PRD_CD_REV <> 'BLV' AND lend_prods = 1 THEN
+                    WHEN product IN {_REV_PRODUCTS} AND COALESCE(PRD_CD_REV, '') <> 'BLV' AND lend_prods = 1 THEN
                         CASE
                             WHEN PIT_STAT_REV = 'CUR' AND blocked = 0 AND stolen = 0 AND CR_LMT_AMT > 0 AND BLOCK_RECL_CD <> 'B5' THEN 'CUR'
                             WHEN PIT_STAT_REV = 'CUR' AND blocked = 1 AND CR_LMT_AMT > 0 AND TOT_NEW_BAL_AMT > 0 AND BLOCK_RECL_CD <> 'B5' AND stolen = 0 AND deceased = 0 THEN 'CUR'
@@ -295,7 +300,7 @@ def export_result(
                             WHEN pit_stat_mor_adj = 'CHG' THEN 'CHG'
                             WHEN COALESCE(pit_stat_mor_adj, '') = '' THEN 'WO'
                         END
-                    WHEN product = 'MOR' AND COMM_TP_CD_MOR <> 'RESIDENTIAL' AND lend_prods = 1 THEN
+                    WHEN product = 'MOR' AND COALESCE(COMM_TP_CD_MOR, '') <> 'RESIDENTIAL' AND lend_prods = 1 THEN
                         CASE
                             WHEN pit_stat_mor_adj = 'CUR' AND OS_BAL_AMT_MOR > 0 THEN 'COMM_CUR'
                             WHEN pit_stat_mor_adj = 'CUR' AND OS_BAL_AMT_MOR = 0 THEN 'COMM_CLO'
