@@ -1,10 +1,20 @@
 """
 Rewrite of J_RRII_KS10_2510_REVLVNG_CR_OBSVTN_PT_DRVD_VAR.sas.
 
-Thin join over the observation-point features (KS branch). The PDEAD/LGD window
-derivation now lives in the features (LAST_NEW_DFT_DT, LAST_NEW_DFT_BAL_AMT,
-MODEL_DFT_F), so this table just projects them keyed by
-BASEL_ACCT_ID + OBSVTN_MTH_TM_ID for SRC_SYS_CD = 'KS'.
+Thin join over the observation-point features (KS branch). Projects the default
+features (LAST_NEW_DFT_DT, LAST_NEW_DFT_BAL_AMT, MODEL_DFT_F).
+
+Two month ids, matching production (SAS `a.MTH_TM_ID AS OBSVTN_MTH_TM_ID`,
+`&mth_tm_id AS process_mth_tm_id`):
+  PROCESS_MTH_TM_ID / PROCESS_DATE  = the RUN month R (delete/replace key)
+  OBSVTN_MTH_TM_ID                  = the OBSERVATION month = R - 12 months
+                                      (PDEAD/CUR observation; 40 tm_id = 1 month)
+
+NOTE: custuniv joins the obsvtn tables on OBSVTN_MTH_TM_ID, so with OBSVTN = R-12
+the row for reporting month M is the one produced by the run at R = M+12. For a
+same-month pipeline, custuniv would instead need to join on PROCESS_MTH_TM_ID.
+The LAST_NEW_DFT_* / MODEL_DFT_F values are still the current-state feature
+derivation (forward-window value parity is a separate reconciliation item).
 """
 
 UPSTREAM_ASSET = [
@@ -39,7 +49,9 @@ def duckdb_load(
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
         mdf.BASEL_ACCT_ID,
-        mdf.OBSVTN_MTH_TM_ID,
+        mdf.OBSVTN_MTH_TM_ID - 12 * 40 AS OBSVTN_MTH_TM_ID,
+        mdf.OBSVTN_MTH_TM_ID AS PROCESS_MTH_TM_ID,
+        DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS PROCESS_DATE,
         dt.LAST_NEW_DFT_DT,
         bal.LAST_NEW_DFT_BAL_AMT,
         mdf.MODEL_DFT_F,
