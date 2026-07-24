@@ -15,11 +15,12 @@ from bns.rrap.helpers.asset_event import (
 # KS is batched 6-way by MOD(HASH(BASEL_ACCT_ID), 6); SPL is a single pass.
 UPSTREAM_ASSET = [
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
-    "features.OS_BAL_AMT",
     "features.OS_BAL_AMT_V2",
     "features.BASEL_PRD_CD",
     "features.HELOC_F",
     "features.ACCRL_STAT_F",
+    "features.SML_BUS_F",
+    "features.CONSM_PRD_TREATMNT_CD",
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
     "ingestion.TM_DIM",
 ]
@@ -159,22 +160,17 @@ RENDER_KS = """
             pit.BASEL_ACCT_ID,
             tm.TM_ID AS mth_tm_id,
             TRIM(pit.PIT_STATUS_CROSS_DEFAULT_ORIG) AS pit_status,
-            osb.OS_BAL_AMT,
+            snp.TOT_NEW_BAL_AMT AS OS_BAL_AMT,
             snp.TOT_UNPAID_FNCL_CHRG_AMT AS charge,
             prd.BASEL_PRD_CD,
             hel.HELOC_F,
-            acc.ACCRL_STAT_F
+            acc.ACCRL_STAT_F,
+            smb.SML_BUS_F,
+            trt.CONSM_PRD_TREATMNT_CD
         FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
         INNER JOIN batch_accounts ba ON ba.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
         INNER JOIN ingestion.TM_DIM tm
             ON tm.TM_LVL_END_DT = pit.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
-        LEFT JOIN (
-            SELECT s.BASEL_ACCT_ID, s.OBSN_DT, s.OS_BAL_AMT FROM features.OS_BAL_AMT s
-            INNER JOIN batch_accounts bacc ON bacc.BASEL_ACCT_ID = s.BASEL_ACCT_ID
-            WHERE s.SRC_SYS_CD = 'KS'
-              AND s.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY s.BASEL_ACCT_ID, s.OBSN_DT ORDER BY s.OS_BAL_AMT DESC NULLS LAST) = 1
-        ) osb ON osb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND osb.OBSN_DT = pit.OBSN_DT
         LEFT JOIN ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT snp
             ON snp.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND snp.MTH_TM_ID = tm.TM_ID
            AND snp.MTH_TM_ID BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 49 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}
@@ -196,6 +192,19 @@ RENDER_KS = """
             WHERE s.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
             QUALIFY ROW_NUMBER() OVER (PARTITION BY s.BASEL_ACCT_ID, s.OBSN_DT ORDER BY s.ACCRL_STAT_F DESC NULLS LAST) = 1
         ) acc ON acc.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND acc.OBSN_DT = pit.OBSN_DT
+        LEFT JOIN (
+            SELECT s.BASEL_ACCT_ID, s.OBSN_DT, s.SML_BUS_F FROM features.SML_BUS_F s
+            INNER JOIN batch_accounts bacc ON bacc.BASEL_ACCT_ID = s.BASEL_ACCT_ID
+            WHERE s.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY s.BASEL_ACCT_ID, s.OBSN_DT ORDER BY s.SML_BUS_F DESC NULLS LAST) = 1
+        ) smb ON smb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND smb.OBSN_DT = pit.OBSN_DT
+        LEFT JOIN (
+            SELECT s.BASEL_ACCT_ID, s.OBSN_DT, s.CONSM_PRD_TREATMNT_CD FROM features.CONSM_PRD_TREATMNT_CD s
+            INNER JOIN batch_accounts bacc ON bacc.BASEL_ACCT_ID = s.BASEL_ACCT_ID
+            WHERE s.SRC_SYS_CD = 'KS'
+              AND s.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY s.BASEL_ACCT_ID, s.OBSN_DT ORDER BY s.CONSM_PRD_TREATMNT_CD DESC NULLS LAST) = 1
+        ) trt ON trt.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND trt.OBSN_DT = pit.OBSN_DT
         WHERE pit.SRC_SYS_CD = 'KS'
           AND pit.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
         QUALIFY ROW_NUMBER() OVER (
@@ -236,7 +245,11 @@ RENDER_KS = """
         SELECT
             BASEL_ACCT_ID,
             MAX(CASE WHEN mth_tm_id = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 12 * 40 THEN pit_status END) AS status_r12,
-            MAX(CASE WHEN mth_tm_id = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 24 * 40 THEN pit_status END) AS status_r24
+            MAX(CASE WHEN mth_tm_id = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 24 * 40 THEN pit_status END) AS status_r24,
+            MAX(CASE WHEN mth_tm_id = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 12 * 40 THEN SML_BUS_F END) AS sml_bus_r12,
+            MAX(CASE WHEN mth_tm_id = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 24 * 40 THEN SML_BUS_F END) AS sml_bus_r24,
+            MAX(CASE WHEN mth_tm_id = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 12 * 40 THEN CONSM_PRD_TREATMNT_CD END) AS treat_r12,
+            MAX(CASE WHEN mth_tm_id = {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 24 * 40 THEN CONSM_PRD_TREATMNT_CD END) AS treat_r24
         FROM panel GROUP BY BASEL_ACCT_ID
     ),
     pdead AS (
@@ -246,7 +259,7 @@ RENDER_KS = """
                           AND n.mth_tm_id BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 12 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}
                          THEN n.mth_tm_id END) AS last_new_dft_tm
             FROM newdef n
-            INNER JOIN obs_status o ON o.BASEL_ACCT_ID = n.BASEL_ACCT_ID AND o.status_r12 = 'CUR'
+            INNER JOIN obs_status o ON o.BASEL_ACCT_ID = n.BASEL_ACCT_ID AND o.status_r12 = 'CUR' AND o.sml_bus_r12 = 'N' AND o.treat_r12 = 'A'
             GROUP BY n.BASEL_ACCT_ID
         ) WHERE last_new_dft_tm IS NOT NULL
     ),
@@ -257,7 +270,7 @@ RENDER_KS = """
                           AND n.mth_tm_id BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 48 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 24 * 40
                          THEN n.mth_tm_id END) AS last_new_dft_tm
             FROM newdef n
-            INNER JOIN obs_status o ON o.BASEL_ACCT_ID = n.BASEL_ACCT_ID AND o.status_r24 IN ('DEF','CHG')
+            INNER JOIN obs_status o ON o.BASEL_ACCT_ID = n.BASEL_ACCT_ID AND o.status_r24 IN ('DEF','CHG') AND o.sml_bus_r24 = 'N' AND o.treat_r24 = 'A'
             GROUP BY n.BASEL_ACCT_ID
         ) WHERE last_new_dft_tm IS NOT NULL
     )
