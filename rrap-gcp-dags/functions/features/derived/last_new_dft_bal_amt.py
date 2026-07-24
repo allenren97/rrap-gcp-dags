@@ -275,7 +275,7 @@ RENDER_KS = """
                           AND n.mth_tm_id BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 48 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 24 * 40
                          THEN n.mth_tm_id END) AS last_new_dft_tm
             FROM newdef n
-            INNER JOIN obs_status o ON o.BASEL_ACCT_ID = n.BASEL_ACCT_ID AND o.status_r24 IN ('DEF','CHG') AND o.sml_bus_r24 = 'N' AND o.treat_r24 = 'A'
+            INNER JOIN obs_status o ON o.BASEL_ACCT_ID = n.BASEL_ACCT_ID AND o.status_r24 <> 'CUR' AND o.sml_bus_r24 = 'N' AND o.treat_r24 = 'A'
             GROUP BY n.BASEL_ACCT_ID
         ) WHERE last_new_dft_tm IS NOT NULL
     )
