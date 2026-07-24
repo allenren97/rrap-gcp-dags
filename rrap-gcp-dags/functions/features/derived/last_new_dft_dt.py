@@ -197,6 +197,10 @@ RENDER_KS = """
         ) trt ON trt.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND trt.OBSN_DT = pit.OBSN_DT
         WHERE pit.SRC_SYS_CD = 'KS'
           AND pit.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
+          -- Only the two disjoint windows are scanned (SAS dataprep J_RRII_KS10_2510:66-68):
+          -- PDEAD [R-12,R] and LGD [R-48,R-24]; the gap (R-24, R-12) is excluded.
+          AND (tm.TM_ID BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 12 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}
+               OR tm.TM_ID BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 48 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 24 * 40)
         QUALIFY ROW_NUMBER() OVER (
             PARTITION BY pit.BASEL_ACCT_ID, tm.TM_ID
             ORDER BY pit.PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
