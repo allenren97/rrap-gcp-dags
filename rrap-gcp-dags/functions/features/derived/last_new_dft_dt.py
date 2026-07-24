@@ -93,7 +93,7 @@ def export_spl(
     pdead AS (
         SELECT BASEL_ACCT_ID, {_TM} - 12 * 40 AS OBSVTN_MTH_TM_ID, last_new_dft_tm FROM (
             SELECT p.BASEL_ACCT_ID,
-                MIN(CASE WHEN p.pit_status = 'DEF'
+                MIN(CASE WHEN p.pit_status IN ('DEF','CHG')
                           AND p.mth_tm_id BETWEEN {_TM} - 12 * 40 AND {_TM}
                           AND (m.mnd_pd IS NULL OR p.mth_tm_id > m.mnd_pd)
                          THEN p.mth_tm_id END) AS last_new_dft_tm
