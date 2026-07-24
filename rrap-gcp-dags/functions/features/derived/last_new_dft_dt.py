@@ -161,7 +161,8 @@ RENDER_KS = """
             prd.BASEL_PRD_CD,
             hel.HELOC_F,
             smb.SML_BUS_F,
-            trt.CONSM_PRD_TREATMNT_CD
+            trt.CONSM_PRD_TREATMNT_CD,
+            snp.BASEL_ACCT_ID IS NOT NULL AS in_snap
         FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
         INNER JOIN batch_accounts ba ON ba.BASEL_ACCT_ID = pit.BASEL_ACCT_ID
         INNER JOIN ingestion.TM_DIM tm
@@ -201,12 +202,19 @@ RENDER_KS = """
             ORDER BY pit.PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
         ) = 1
     ),
+    -- Restrict the CUR->DEF edge scan to snapshot-present months so LAG skips months
+    -- the account has no revolving snapshot for -- matching the SAS dataprep's INNER
+    -- JOIN to BASEL_REVLVNG_CR_MTH_SNAPSHOT (J_RRII_KS10_2510:60-63). obs_status (the
+    -- cohort) stays over the full panel: it comes from the derived vars, not snapshot.
+    edge_panel AS (
+        SELECT * FROM panel WHERE in_snap
+    ),
     lagged AS (
         SELECT *,
             LAG(pit_status)  OVER w AS lag_status,
             LAG(OS_BAL_AMT)  OVER w AS lag_bal,
             LAG(charge)      OVER w AS lag_charge
-        FROM panel
+        FROM edge_panel
         WINDOW w AS (PARTITION BY BASEL_ACCT_ID ORDER BY mth_tm_id)
     ),
     newdef AS (
