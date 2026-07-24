@@ -207,7 +207,13 @@ RENDER_KS = """
     -- JOIN to BASEL_REVLVNG_CR_MTH_SNAPSHOT (J_RRII_KS10_2510:60-63). obs_status (the
     -- cohort) stays over the full panel: it comes from the derived vars, not snapshot.
     edge_panel AS (
-        SELECT * FROM panel WHERE in_snap
+        SELECT *,
+            CASE
+                WHEN mth_tm_id BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 12 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} THEN 'PD'
+                WHEN mth_tm_id BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 48 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 24 * 40 THEN 'LGD'
+                ELSE 'GAP'
+            END AS wnd
+        FROM panel WHERE in_snap
     ),
     lagged AS (
         SELECT *,
@@ -215,7 +221,10 @@ RENDER_KS = """
             LAG(OS_BAL_AMT)  OVER w AS lag_bal,
             LAG(charge)      OVER w AS lag_charge
         FROM edge_panel
-        WINDOW w AS (PARTITION BY BASEL_ACCT_ID ORDER BY mth_tm_id)
+        -- Lag scoped per window: the SAS runs the defaulter macro separately for each
+        -- window (macro WHERE mth_tm_id BETWEEN WINDOW_START AND WINDOW_END), so the
+        -- first in-window month has a NULL lag (no edge detectable at the R-48 LGD start).
+        WINDOW w AS (PARTITION BY BASEL_ACCT_ID, wnd ORDER BY mth_tm_id)
     ),
     newdef AS (
         SELECT BASEL_ACCT_ID, mth_tm_id, pit_status,
