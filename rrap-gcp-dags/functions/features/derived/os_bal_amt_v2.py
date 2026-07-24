@@ -189,15 +189,14 @@ def export_spl(
             os_bal_amtv2 AS (
                 SELECT
                     m.basel_acct_id,
+                    -- Bare addition, mirroring SAS J_RRAP_TL10_2104:880-883
+                    -- (principal_bal + addon_bal + int_at_default). No COALESCE(...,0):
+                    -- a missing int_at_default must yield NULL, not a phantom 0.
                     CASE
-                        WHEN p.pit_status_cross_default_orig IN ('DEF', 'CHG') THEN COALESCE(
-                            m.tot_crnt_bal_amt + i.int_at_default + m.add_on_bal_amt,
-                            0
-                        )
-                        WHEN p.pit_status_cross_default_orig IN ('CUR', 'CLO') THEN COALESCE(
-                            m.tot_crnt_bal_amt + m.accr_intr + m.add_on_bal_amt,
-                            0
-                        )
+                        WHEN p.pit_status_cross_default_orig IN ('DEF', 'CHG') THEN
+                            m.tot_crnt_bal_amt + i.int_at_default + m.add_on_bal_amt
+                        WHEN p.pit_status_cross_default_orig IN ('CUR', 'CLO') THEN
+                            m.tot_crnt_bal_amt + m.accr_intr + m.add_on_bal_amt
                     END AS os_bal_amt_v2
                 FROM
                     main_curr AS m
