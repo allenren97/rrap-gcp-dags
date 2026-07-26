@@ -13,7 +13,8 @@ from bns.rrap.helpers.asset_event import (
 #        use the prior month's (default_tm - 40) balance instead.
 #   SPL: features.OS_BAL_AMT (V1 = tot_crnt_bal + add_on + accr_intr) at the default
 #        month. (SAS uses OS_BAL_AMT_V2 = ...+ int_at_default for DEF/CHG; OS_BAL_AMT is
-#        used here per request -- it has SRC_SYS_CD and avoids the int_at_default 0s.)
+#        used here per request -- it avoids the int_at_default 0s. No SRC_SYS_CD filter:
+#        OS_BAL_AMT has no such data column and the panel is already SPL-only.)
 # KS is batched 6-way by MOD(HASH(BASEL_ACCT_ID), 6); SPL is a single pass.
 UPSTREAM_ASSET = [
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
@@ -71,11 +72,11 @@ def export_spl(
         INNER JOIN ingestion.TM_DIM tm
             ON tm.TM_LVL_END_DT = pit.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
         LEFT JOIN (
-            -- SPL balance from features.OS_BAL_AMT (V1 = tot_crnt_bal + add_on + accr_intr),
-            -- not OS_BAL_AMT_V2. OS_BAL_AMT is multi-source and DOES carry SRC_SYS_CD, so
-            -- filter to 'SPL' here.
+            -- SPL balance from features.OS_BAL_AMT (V1 = tot_crnt_bal + add_on + accr_intr).
+            -- OS_BAL_AMT has no SRC_SYS_CD data column (partition key only), so no source
+            -- filter here -- the panel is already SPL-only (pit.SRC_SYS_CD='SPL') and
+            -- BASEL_ACCT_ID is system-specific, so the join by (acct, OBSN_DT) is the SPL row.
             SELECT BASEL_ACCT_ID, OBSN_DT, OS_BAL_AMT FROM features.OS_BAL_AMT
-            WHERE SRC_SYS_CD = 'SPL'
             QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY OS_BAL_AMT DESC NULLS LAST) = 1
         ) osb ON osb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND osb.OBSN_DT = pit.OBSN_DT
         WHERE pit.SRC_SYS_CD = 'SPL'
