@@ -70,38 +70,56 @@ def export_spl(
             ORDER BY pit.PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
         ) = 1
     ),
-    -- SPL new-default per SAS J_RRAP_TL10_2201: MAX_NON_DEF = latest CUR in the
-    -- window; LAST_NEW_DEF = earliest DEF after it, or if no CUR in the window the
-    -- earliest DEF in the window (:1824-1827, :2005-2011). DEF-only (CHG is neither a
-    -- reset nor a new default: :1234/:1695), and no CUR-at-obs cohort filter.
-    mnd AS (
-        SELECT
-            BASEL_ACCT_ID,
-            MAX(CASE WHEN pit_status = 'CUR' AND mth_tm_id BETWEEN {_TM} - 12 * 40 AND {_TM}          THEN mth_tm_id END) AS mnd_pd,
-            MAX(CASE WHEN pit_status = 'CUR' AND mth_tm_id BETWEEN {_TM} - 48 * 40 AND {_TM} - 24 * 40 THEN mth_tm_id END) AS mnd_lgd
+    -- PDEAD (R-12) new-default = SAS J_RRAP_TL10_2201 LGD-ND STEP 1/2/3:
+    --   STEP 1  max_def = latest ('DEF','CHG') in [R-11, R]  (obs_month_start+40 .. end)
+    --   STEP 2  mnd_pd  = latest CUR <= max_def in [R-12, R] (last CUR BEFORE the last
+    --                     default); account must have a DEF/CHG (max_def not null)
+    --   STEP 3  date    = earliest ('DEF','CHG') after mnd_pd (earliest if no such CUR)
+    -- Using the *global* last CUR (not <= max_def) dropped accounts that defaulted then
+    -- recovered by R (CUR->DEF->CUR) -- the PDEAD nulls vs prod dates.
+    mdd_pd AS (
+        SELECT BASEL_ACCT_ID,
+            MAX(CASE WHEN pit_status IN ('DEF','CHG') AND mth_tm_id BETWEEN {_TM} - 11 * 40 AND {_TM} THEN mth_tm_id END) AS max_def
         FROM panel GROUP BY BASEL_ACCT_ID
+    ),
+    mnd_pd AS (
+        SELECT p.BASEL_ACCT_ID, d.max_def,
+            MAX(CASE WHEN p.pit_status = 'CUR' AND p.mth_tm_id BETWEEN {_TM} - 12 * 40 AND {_TM}
+                      AND p.mth_tm_id <= d.max_def THEN p.mth_tm_id END) AS mnd
+        FROM panel p
+        JOIN mdd_pd d ON d.BASEL_ACCT_ID = p.BASEL_ACCT_ID
+        WHERE d.max_def IS NOT NULL
+        GROUP BY p.BASEL_ACCT_ID, d.max_def
     ),
     pdead AS (
         SELECT BASEL_ACCT_ID, {_TM} - 12 * 40 AS OBSVTN_MTH_TM_ID FROM (
             SELECT p.BASEL_ACCT_ID,
-                MIN(CASE WHEN p.pit_status = 'DEF'
-                          AND p.mth_tm_id BETWEEN {_TM} - 12 * 40 AND {_TM}
-                          AND (m.mnd_pd IS NULL OR p.mth_tm_id > m.mnd_pd)
+                MIN(CASE WHEN p.pit_status IN ('DEF','CHG')
+                          AND p.mth_tm_id BETWEEN {_TM} - 11 * 40 AND {_TM}
+                          AND (m.mnd IS NULL OR p.mth_tm_id > m.mnd)
                          THEN p.mth_tm_id END) AS last_new_dft_tm
             FROM panel p
-            JOIN mnd m ON m.BASEL_ACCT_ID = p.BASEL_ACCT_ID
+            JOIN mnd_pd m ON m.BASEL_ACCT_ID = p.BASEL_ACCT_ID
             GROUP BY p.BASEL_ACCT_ID
         ) WHERE last_new_dft_tm IS NOT NULL
+    ),
+    -- LGD (R-24): simpler (LGD-D STEP 2/2B) -- DEF-only, last CUR in the window,
+    -- earliest DEF after. The account is in default AT R-24 by cohort, so the global
+    -- last CUR is already the last CUR before the current default (no cured-at-end).
+    mnd_lgd AS (
+        SELECT BASEL_ACCT_ID,
+            MAX(CASE WHEN pit_status = 'CUR' AND mth_tm_id BETWEEN {_TM} - 48 * 40 AND {_TM} - 24 * 40 THEN mth_tm_id END) AS mnd
+        FROM panel GROUP BY BASEL_ACCT_ID
     ),
     lgd AS (
         SELECT BASEL_ACCT_ID, {_TM} - 24 * 40 AS OBSVTN_MTH_TM_ID FROM (
             SELECT p.BASEL_ACCT_ID,
                 MIN(CASE WHEN p.pit_status = 'DEF'
                           AND p.mth_tm_id BETWEEN {_TM} - 48 * 40 AND {_TM} - 24 * 40
-                          AND (m.mnd_lgd IS NULL OR p.mth_tm_id > m.mnd_lgd)
+                          AND (m.mnd IS NULL OR p.mth_tm_id > m.mnd)
                          THEN p.mth_tm_id END) AS last_new_dft_tm
             FROM panel p
-            JOIN mnd m ON m.BASEL_ACCT_ID = p.BASEL_ACCT_ID
+            JOIN mnd_lgd m ON m.BASEL_ACCT_ID = p.BASEL_ACCT_ID
             GROUP BY p.BASEL_ACCT_ID
         ) WHERE last_new_dft_tm IS NOT NULL
     )
