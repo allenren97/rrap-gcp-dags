@@ -69,8 +69,11 @@ def export_spl(
         INNER JOIN ingestion.TM_DIM tm
             ON tm.TM_LVL_END_DT = pit.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
         LEFT JOIN (
+            -- OS_BAL_AMT_V2 is SPL-only (os_bal_amt_v2.py has only export_spl) and carries
+            -- no SRC_SYS_CD data column -- it's only a partition key. The old
+            -- WHERE SRC_SYS_CD='SPL' matched a null/absent column and dropped every row,
+            -- leaving the balance NULL. No source filter is needed here.
             SELECT BASEL_ACCT_ID, OBSN_DT, OS_BAL_AMT_V2 AS OS_BAL_AMT FROM features.OS_BAL_AMT_V2
-            WHERE SRC_SYS_CD = 'SPL'
             QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY OS_BAL_AMT_V2 DESC NULLS LAST) = 1
         ) osb ON osb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND osb.OBSN_DT = pit.OBSN_DT
         WHERE pit.SRC_SYS_CD = 'SPL'
