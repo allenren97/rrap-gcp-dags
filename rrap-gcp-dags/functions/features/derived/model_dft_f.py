@@ -17,6 +17,7 @@ UPSTREAM_ASSET = [
     "features.HELOC_F",
     "features.SML_BUS_F",
     "features.CONSM_PRD_TREATMNT_CD",
+    "features.TREATMENT_F",
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
     "ingestion.TM_DIM",
 ]
@@ -114,6 +115,15 @@ def export_spl(
             MAX(CASE WHEN mth_tm_id = {_TM} - 24 * 40 THEN pit_status END) AS status_r24
         FROM panel GROUP BY BASEL_ACCT_ID
     ),
+    -- TREATMENT_F at R-24 (SAS 2201:2658 TREATMNT_F='A'). features.TREATMENT_F has no
+    -- SRC_SYS_CD column, so resolve the R-24 month via TM_DIM and dedup per account.
+    treat_lgd AS (
+        SELECT t.BASEL_ACCT_ID, t.TREATMENT_F
+        FROM features.TREATMENT_F t
+        JOIN ingestion.TM_DIM tm ON tm.TM_LVL_END_DT = t.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
+        WHERE tm.TM_ID = {_TM} - 24 * 40
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY t.BASEL_ACCT_ID ORDER BY t.TREATMENT_F DESC NULLS LAST) = 1
+    ),
     lgd AS (
         SELECT BASEL_ACCT_ID, {_TM} - 24 * 40 AS OBSVTN_MTH_TM_ID FROM (
             SELECT p.BASEL_ACCT_ID,
@@ -123,6 +133,7 @@ def export_spl(
                          THEN p.mth_tm_id END) AS last_new_dft_tm
             FROM panel p
             JOIN mnd_lgd m ON m.BASEL_ACCT_ID = p.BASEL_ACCT_ID AND m.status_r24 = 'DEF'
+            JOIN treat_lgd t ON t.BASEL_ACCT_ID = p.BASEL_ACCT_ID AND t.TREATMENT_F = 'A'
             GROUP BY p.BASEL_ACCT_ID
         ) WHERE last_new_dft_tm IS NOT NULL
     )
