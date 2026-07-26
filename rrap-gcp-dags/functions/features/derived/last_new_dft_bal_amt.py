@@ -11,11 +11,13 @@ from bns.rrap.helpers.asset_event import (
 #   KS : GREATEST(OS_BAL_AMT [=TOT_NEW_BAL_AMT] at the default month, 0), with the
 #        special case: if that month is CHG or ACCRL_STAT_F='N' and OS_BAL_AMT = 0,
 #        use the prior month's (default_tm - 40) balance instead.
-#   SPL: OS_BAL_AMT_V2 at the default month (SAS: `OS_BAL_AMT_V2 as OS_BAL_AMT`).
+#   SPL: features.OS_BAL_AMT (V1 = tot_crnt_bal + add_on + accr_intr) at the default
+#        month. (SAS uses OS_BAL_AMT_V2 = ...+ int_at_default for DEF/CHG; OS_BAL_AMT is
+#        used here per request -- it has SRC_SYS_CD and avoids the int_at_default 0s.)
 # KS is batched 6-way by MOD(HASH(BASEL_ACCT_ID), 6); SPL is a single pass.
 UPSTREAM_ASSET = [
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
-    "features.OS_BAL_AMT_V2",
+    "features.OS_BAL_AMT",
     "features.BASEL_PRD_CD",
     "features.HELOC_F",
     "features.ACCRL_STAT_F",
@@ -53,7 +55,7 @@ def duckdb_delete(
     pass
 
 
-# SPL: status-only default definition; balance = OS_BAL_AMT_V2 at the default month.
+# SPL: balance = features.OS_BAL_AMT (V1) at the default month.
 def export_spl(
     duckdb_conn_id="duckdb-conn",
     resource_tier="HIGH",
@@ -69,12 +71,12 @@ def export_spl(
         INNER JOIN ingestion.TM_DIM tm
             ON tm.TM_LVL_END_DT = pit.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
         LEFT JOIN (
-            -- OS_BAL_AMT_V2 is SPL-only (os_bal_amt_v2.py has only export_spl) and carries
-            -- no SRC_SYS_CD data column -- it's only a partition key. The old
-            -- WHERE SRC_SYS_CD='SPL' matched a null/absent column and dropped every row,
-            -- leaving the balance NULL. No source filter is needed here.
-            SELECT BASEL_ACCT_ID, OBSN_DT, OS_BAL_AMT_V2 AS OS_BAL_AMT FROM features.OS_BAL_AMT_V2
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY OS_BAL_AMT_V2 DESC NULLS LAST) = 1
+            -- SPL balance from features.OS_BAL_AMT (V1 = tot_crnt_bal + add_on + accr_intr),
+            -- not OS_BAL_AMT_V2. OS_BAL_AMT is multi-source and DOES carry SRC_SYS_CD, so
+            -- filter to 'SPL' here.
+            SELECT BASEL_ACCT_ID, OBSN_DT, OS_BAL_AMT FROM features.OS_BAL_AMT
+            WHERE SRC_SYS_CD = 'SPL'
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY OS_BAL_AMT DESC NULLS LAST) = 1
         ) osb ON osb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND osb.OBSN_DT = pit.OBSN_DT
         WHERE pit.SRC_SYS_CD = 'SPL'
           AND pit.OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 49 MONTH) AND DATE '{_RUNDATE}'
