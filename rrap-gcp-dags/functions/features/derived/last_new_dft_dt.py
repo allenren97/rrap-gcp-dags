@@ -112,12 +112,15 @@ def export_spl(
             GROUP BY p.BASEL_ACCT_ID
         ) WHERE last_new_dft_tm IS NOT NULL
     ),
-    -- LGD (R-24): simpler (LGD-D STEP 2/2B) -- DEF-only, last CUR in the window,
-    -- earliest DEF after. The account is in default AT R-24 by cohort, so the global
-    -- last CUR is already the last CUR before the current default (no cured-at-end).
+    -- LGD (R-24): the observation cohort is accounts that are DEF *at R-24*
+    -- (SAS 2201:2657 PIT_STATUS_V2 IN ('DEF') at obs_month_end). Without that filter
+    -- the emulation flags accounts that defaulted in [R-48,R-24] but charged off /
+    -- recovered / closed by R-24 -- prod excludes them (the prod-NULL vs gen-Y over-flag).
+    -- DEF-only, last CUR in the window, earliest DEF after (LGD-D STEP 2/2B).
     mnd_lgd AS (
         SELECT BASEL_ACCT_ID,
-            MAX(CASE WHEN pit_status = 'CUR' AND mth_tm_id BETWEEN {_TM} - 48 * 40 AND {_TM} - 24 * 40 THEN mth_tm_id END) AS mnd
+            MAX(CASE WHEN pit_status = 'CUR' AND mth_tm_id BETWEEN {_TM} - 48 * 40 AND {_TM} - 24 * 40 THEN mth_tm_id END) AS mnd,
+            MAX(CASE WHEN mth_tm_id = {_TM} - 24 * 40 THEN pit_status END) AS status_r24
         FROM panel GROUP BY BASEL_ACCT_ID
     ),
     lgd AS (
@@ -128,7 +131,7 @@ def export_spl(
                           AND (m.mnd IS NULL OR p.mth_tm_id > m.mnd)
                          THEN p.mth_tm_id END) AS last_new_dft_tm
             FROM panel p
-            JOIN mnd_lgd m ON m.BASEL_ACCT_ID = p.BASEL_ACCT_ID
+            JOIN mnd_lgd m ON m.BASEL_ACCT_ID = p.BASEL_ACCT_ID AND m.status_r24 = 'DEF'
             GROUP BY p.BASEL_ACCT_ID
         ) WHERE last_new_dft_tm IS NOT NULL
     )
