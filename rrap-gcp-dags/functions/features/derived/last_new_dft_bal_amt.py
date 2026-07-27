@@ -11,14 +11,16 @@ from bns.rrap.helpers.asset_event import (
 #   KS : GREATEST(OS_BAL_AMT [=TOT_NEW_BAL_AMT] at the default month, 0), with the
 #        special case: if that month is CHG or ACCRL_STAT_F='N' and OS_BAL_AMT = 0,
 #        use the prior month's (default_tm - 40) balance instead.
-#   SPL: features.OS_BAL_AMT (V1 = tot_crnt_bal + add_on + accr_intr) at the default
-#        month. (SAS uses OS_BAL_AMT_V2 = ...+ int_at_default for DEF/CHG; OS_BAL_AMT is
-#        used here per request -- it avoids the int_at_default 0s. No SRC_SYS_CD filter:
-#        OS_BAL_AMT has no such data column and the panel is already SPL-only.)
+#   SPL: OS_BAL_AMT V1 (tot_crnt_bal + add_on + accr_intr) at the default month,
+#        computed INLINE from the raw BASEL_PSNL_LOAN_MTH_SNAPSHOT so every historical
+#        month is covered. (SAS uses OS_BAL_AMT_V2 = ...+ int_at_default for DEF/CHG; V1
+#        is used here per request -- it avoids the int_at_default 0s. Sourcing the frozen
+#        features.OS_BAL_AMT keyed by OBSN_DT left the deep LGD months R-24..R-48 NULL,
+#        since that feature only has a row at each run month, so it is computed inline.)
 # KS is batched 6-way by MOD(HASH(BASEL_ACCT_ID), 6); SPL is a single pass.
 UPSTREAM_ASSET = [
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
-    "features.OS_BAL_AMT",
+    "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
     "features.BASEL_PRD_CD",
     "features.HELOC_F",
     "features.ACCRL_STAT_F",
@@ -57,7 +59,7 @@ def duckdb_delete(
     pass
 
 
-# SPL: balance = features.OS_BAL_AMT (V1) at the default month.
+# SPL: balance = OS_BAL_AMT V1 computed inline from the raw snapshot at the default month.
 def export_spl(
     duckdb_conn_id="duckdb-conn",
     resource_tier="HIGH",
@@ -73,13 +75,21 @@ def export_spl(
         INNER JOIN ingestion.TM_DIM tm
             ON tm.TM_LVL_END_DT = pit.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
         LEFT JOIN (
-            -- SPL balance from features.OS_BAL_AMT (V1 = tot_crnt_bal + add_on + accr_intr).
-            -- OS_BAL_AMT has no SRC_SYS_CD data column (partition key only), so no source
-            -- filter here -- the panel is already SPL-only (pit.SRC_SYS_CD='SPL') and
-            -- BASEL_ACCT_ID is system-specific, so the join by (acct, OBSN_DT) is the SPL row.
-            SELECT BASEL_ACCT_ID, OBSN_DT, OS_BAL_AMT FROM features.OS_BAL_AMT
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY OS_BAL_AMT DESC NULLS LAST) = 1
-        ) osb ON osb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND osb.OBSN_DT = pit.OBSN_DT
+            -- SPL balance computed INLINE from the raw monthly snapshot, using the exact
+            -- OS_BAL_AMT V1 formula (tot_crnt_bal + add_on + accr_intr; os_bal_amt.py:76).
+            -- Sourcing from features.OS_BAL_AMT keyed by OBSN_DT failed for the LGD window:
+            -- that feature is computed only at each run month and stored one OBSN_DT per run,
+            -- so the deep LGD default months (R-24..R-48) had no row -> NULL balance. The raw
+            -- snapshot carries every historical month (this is how SAS sources it), keyed by
+            -- (BASEL_ACCT_ID, mth_tm_id). Dedup to one row per (acct, month) like the panel.
+            SELECT BASEL_ACCT_ID, MTH_TM_ID,
+                COALESCE(TOT_CRNT_BAL_AMT, 0) + COALESCE(ADD_ON_BAL_AMT, 0) + COALESCE(ACCR_INTR, 0) AS OS_BAL_AMT
+            FROM ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY BASEL_ACCT_ID, MTH_TM_ID
+                ORDER BY (COALESCE(TOT_CRNT_BAL_AMT, 0) + COALESCE(ADD_ON_BAL_AMT, 0) + COALESCE(ACCR_INTR, 0)) DESC NULLS LAST
+            ) = 1
+        ) osb ON osb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND osb.MTH_TM_ID = tm.TM_ID
         WHERE pit.SRC_SYS_CD = 'SPL'
           AND pit.OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 49 MONTH) AND DATE '{_RUNDATE}'
         QUALIFY ROW_NUMBER() OVER (
