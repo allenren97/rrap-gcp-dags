@@ -51,17 +51,24 @@ def duckdb_load(
     sql=f"""
     INSERT INTO {DOWNSTREAM_ASSET} BY NAME
     WITH cohort AS (
+        -- PDEAD (R-12): full observation cohort from the snapshot; MODEL_DFT_F is Y/N
+        -- (SAS LGD-ND, J_RRAP_TL10_2201:5726-5730).
         SELECT DISTINCT BASEL_ACCT_ID,
             {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 12 * 40 AS OBSVTN_MTH_TM_ID
         FROM ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT
         WHERE MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 12 * 40
           AND RECD_STAT_CD IN (4, 5, 6, 7, 8)
         UNION ALL
-        SELECT DISTINCT BASEL_ACCT_ID,
-            {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 24 * 40 AS OBSVTN_MTH_TM_ID
-        FROM ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT
-        WHERE MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 24 * 40
-          AND RECD_STAT_CD IN (4, 5, 6, 7, 8)
+        -- LGD (R-24): DEFAULTERS ONLY. SAS LGD-D builds WLGH4H as the cohort
+        -- (PIT_STATUS_V2='DEF' AND TREATMNT_F='A' at R-24, :2657-2658) INNER JOIN
+        -- PreFinal (= LAST_NEW_DEF_DATE, defaulters, :2520/:2807), so non-defaulters are
+        -- dropped. Those two cohort filters are already applied inside features.MODEL_DFT_F
+        -- LGD, so its rows are exactly that intersection -- source the R-24 cohort from it.
+        SELECT DISTINCT BASEL_ACCT_ID, OBSVTN_MTH_TM_ID
+        FROM features.MODEL_DFT_F
+        WHERE OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 24 * 40
+          AND OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+          AND SRC_SYS_CD = 'SPL'
     )
     SELECT
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
@@ -72,7 +79,14 @@ def duckdb_load(
         DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS PROCESS_DATE,
         dt.LAST_NEW_DFT_DT,
         bal.LAST_NEW_DFT_BAL_AMT,
-        CASE WHEN mdf.BASEL_ACCT_ID IS NOT NULL THEN 'Y' ELSE 'N' END AS MODEL_DFT_F,
+        -- PDEAD (R-12): 'Y' if the account has a new default, else 'N' (SAS LGD-ND
+        -- case, :5726-5730). LGD (R-24): always NULL -- SAS LGD-D inits MODEL_DFT_F=''
+        -- and never sets it (:2635, WLGH4H :2778), so the whole R-24 column is blank/NULL.
+        CASE
+            WHEN c.OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 24 * 40 THEN NULL
+            WHEN mdf.BASEL_ACCT_ID IS NOT NULL THEN 'Y'
+            ELSE 'N'
+        END AS MODEL_DFT_F,
         CURRENT_TIMESTAMP AS INSRT_PROCESS_TMSTMP,
         CURRENT_TIMESTAMP AS UPDT_PROCESS_TMSTMP
     FROM cohort c
