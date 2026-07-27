@@ -261,12 +261,12 @@ def export_result(
                 CASE
                     WHEN product IN {_REV_PRODUCTS} AND COALESCE(PRD_CD_REV, '') <> 'BLV' AND lend_prods = 1 THEN
                         CASE
-                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 0 AND stolen = 0 AND CR_LMT_AMT > 0 AND BLOCK_RECL_CD <> 'B5' THEN 'CUR'
-                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 1 AND CR_LMT_AMT > 0 AND TOT_NEW_BAL_AMT > 0 AND BLOCK_RECL_CD <> 'B5' AND stolen = 0 AND deceased = 0 THEN 'CUR'
-                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 0 AND CR_LMT_AMT = 0 AND TOT_NEW_BAL_AMT <= 0 AND BLOCK_RECL_CD <> 'B5' AND deceased = 0 THEN 'CLO'
-                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 1 AND TOT_NEW_BAL_AMT <= 0 AND deceased = 0 AND BLOCK_RECL_CD <> 'B5' THEN 'CLO'
-                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 0 AND stolen = 1 AND BLOCK_RECL_CD <> 'B5' AND deceased = 0 THEN 'CLO'
-                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 0 AND stolen = 0 AND deceased = 1 AND BLOCK_RECL_CD <> 'B5' THEN 'CLO'
+                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 0 AND stolen = 0 AND CR_LMT_AMT > 0 AND COALESCE(BLOCK_RECL_CD, '') <> 'B5' THEN 'CUR'
+                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 1 AND CR_LMT_AMT > 0 AND TOT_NEW_BAL_AMT > 0 AND COALESCE(BLOCK_RECL_CD, '') <> 'B5' AND stolen = 0 AND deceased = 0 THEN 'CUR'
+                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 0 AND CR_LMT_AMT = 0 AND TOT_NEW_BAL_AMT <= 0 AND COALESCE(BLOCK_RECL_CD, '') <> 'B5' AND deceased = 0 THEN 'CLO'
+                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 1 AND TOT_NEW_BAL_AMT <= 0 AND deceased = 0 AND COALESCE(BLOCK_RECL_CD, '') <> 'B5' THEN 'CLO'
+                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 0 AND stolen = 1 AND COALESCE(BLOCK_RECL_CD, '') <> 'B5' AND deceased = 0 THEN 'CLO'
+                            WHEN PIT_STAT_REV = 'CUR' AND blocked = 0 AND stolen = 0 AND deceased = 1 AND COALESCE(BLOCK_RECL_CD, '') <> 'B5' THEN 'CLO'
                             WHEN PIT_STAT_REV = 'CUR' AND blocked = 1 AND stolen = 0 AND deceased = 0 AND BLOCK_RECL_CD = 'B5' THEN 'BNK'
                             WHEN PIT_STAT_REV = 'DEF' THEN 'DEF'
                             WHEN PIT_STAT_REV = 'CHG' THEN 'CHG'
