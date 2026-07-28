@@ -16,10 +16,12 @@ same-month pipeline, custuniv would instead need to join on PROCESS_MTH_TM_ID.
 """
 
 UPSTREAM_ASSET = [
-    "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
+    "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
+    "features.TREATMENT_F",
     "features.MODEL_DFT_F",
     "features.LAST_NEW_DFT_DT",
     "features.LAST_NEW_DFT_BAL_AMT",
+    "ingestion.TM_DIM",
 ]
 
 DOWNSTREAM_ASSET = "emulated.PSNL_LOAN_OBSVTN_PT_DRVD_VAR"
@@ -40,24 +42,49 @@ def duckdb_delete(
     pass
 
 
-# Full observation cohort, mirroring SAS J_RRAP_TL10_2201: the obsvtn table is the
-# personal-loan snapshot at the observation month (:2597,:5758) with MODEL_DFT_F='Y'
-# only for accounts that have a new default (LAST_NEW_DEF_DATE), else 'N' (:5726).
-# The features supply the 'Y' rows (defaulters); the cohort supplies the 'N' rows.
-# Cohort per window: SPL accounts in the snapshot at OBSVTN month (R-12 PDEAD /
-# R-24 LGD), RECD_STAT_CD in (4,5,6,7,8), one row per BASEL_ACCT_ID.
+# Observation cohort, mirroring SAS J_RRAP_TL10_2201 -- a small defaulter cohort, NOT
+# the full active book:
+#   PDEAD (R-12, LGD-ND :5587-5613): CUR + TREATMNT_F='A' at R-12, restricted to accounts
+#     with DEF/CHG in [R-12, R] (HD_FILTER_ACCOUNT). MODEL_DFT_F = 'Y'/'N' (:5726).
+#   LGD   (R-24, LGD-D :2657-2807): DEF + TREATMNT_F='A' at R-24, defaulters only.
+#     MODEL_DFT_F is always NULL (:2635 init '', never set). Sourced from features.MODEL_DFT_F.
 def duckdb_load(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
     INSERT INTO {DOWNSTREAM_ASSET} BY NAME
     WITH cohort AS (
-        -- PDEAD (R-12): full observation cohort from the snapshot; MODEL_DFT_F is Y/N
-        -- (SAS LGD-ND, J_RRAP_TL10_2201:5726-5730).
-        SELECT DISTINCT BASEL_ACCT_ID,
+        -- PDEAD (R-12): SAS LGD-ND cohort (J_RRAP_TL10_2201:5587-5613). NOT the full
+        -- active book -- accounts that are CUR + TREATMNT_F='A' at R-12 (obs_month_start)
+        -- AND hit DEF/CHG somewhere in [R-12, R] (the HD_FILTER_ACCOUNT inner join,
+        -- :2004/:2034). MODEL_DFT_F is then Y/N within that cohort (:5726-5730).
+        SELECT DISTINCT cur12.BASEL_ACCT_ID,
             {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 12 * 40 AS OBSVTN_MTH_TM_ID
-        FROM ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT
-        WHERE MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 12 * 40
-          AND RECD_STAT_CD IN (4, 5, 6, 7, 8)
+        FROM (
+            -- CUR at R-12
+            SELECT pit.BASEL_ACCT_ID
+            FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
+            JOIN ingestion.TM_DIM tm ON tm.TM_LVL_END_DT = pit.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
+            WHERE tm.TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 12 * 40
+              AND pit.SRC_SYS_CD = 'SPL' AND TRIM(pit.PIT_STATUS_CROSS_DEFAULT_ORIG) = 'CUR'
+        ) cur12
+        JOIN (
+            -- TREATMNT_F='A' at R-12
+            SELECT t.BASEL_ACCT_ID
+            FROM features.TREATMENT_F t
+            JOIN ingestion.TM_DIM tm ON tm.TM_LVL_END_DT = t.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
+            WHERE tm.TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 12 * 40
+              AND t.TREATMENT_F = 'A'
+        ) trt12 ON trt12.BASEL_ACCT_ID = cur12.BASEL_ACCT_ID
+        JOIN (
+            -- HD_FILTER_ACCOUNT: DEF/CHG somewhere in [R-12, R]
+            SELECT DISTINCT p.BASEL_ACCT_ID
+            FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG p
+            JOIN ingestion.TM_DIM tm ON tm.TM_LVL_END_DT = p.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
+            WHERE p.SRC_SYS_CD = 'SPL'
+              AND tm.TM_ID BETWEEN {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} - 12 * 40
+                              AND {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+              AND TRIM(p.PIT_STATUS_CROSS_DEFAULT_ORIG) IN ('DEF', 'CHG')
+        ) filt ON filt.BASEL_ACCT_ID = cur12.BASEL_ACCT_ID
         UNION ALL
         -- LGD (R-24): DEFAULTERS ONLY. SAS LGD-D builds WLGH4H as the cohort
         -- (PIT_STATUS_V2='DEF' AND TREATMNT_F='A' at R-24, :2657-2658) INNER JOIN
