@@ -8,10 +8,13 @@ Reproduces rrap-gcp-dags/functions/cbs/custuniv/custuniv_01.py without Airflow:
   3. COPY result     -> parquet
 
 Assumes all upstream data is already present in the DuckDB database, reachable as
-ingestion.*, emulated.*  (attach your DuckLake / .duckdb first if needed).
+ingestion.*, emulated.*  (attach your DuckLake / .duckdb first if needed). The two
+observation-point tables are read from parquet via read_parquet() -- hardcode the two
+paths in GATHER_SQL ('/PATH/TO/..._OBSVTN_PT_DRVD_VAR.parquet'). Single stream: the
+STREAM joins are not filtered.
 
 Usage:
-  python run_custuniv01.py --db /path/to/catalog.duckdb --stream <STREAM> \
+  python run_custuniv01.py --db /path/to/catalog.duckdb \
       --rundate 2026-05-31 --out cis_data_pop_02_20260531.parquet
 """
 import argparse
@@ -100,15 +103,12 @@ GATHER_SQL = """
     LEFT JOIN emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS c
         ON b.BASEL_ACCT_ID = c.BASEL_ACCT_ID
        AND c.MTH_TM_ID = __MTH_TM_ID__
-       AND c.STREAM = '__STREAM__'
     LEFT JOIN emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 d
         ON b.BASEL_ACCT_ID = d.BASEL_ACCT_ID
        AND d.MTH_TM_ID = __MTH_TM_ID__
-       AND d.STREAM = '__STREAM__'
     LEFT JOIN emulated.BASEL_MORT_ACCT_DRVD_VARS e
         ON b.BASEL_ACCT_ID = e.BASEL_ACCT_ID
        AND e.MTH_TM_ID = __MTH_TM_ID__
-       AND e.STREAM = '__STREAM__'
     LEFT JOIN ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT f
         ON b.BASEL_ACCT_ID = f.BASEL_ACCT_ID
        AND f.MTH_TM_ID = __MTH_TM_ID__
@@ -118,24 +118,20 @@ GATHER_SQL = """
     LEFT JOIN ingestion.BASEL_MORT_MTH_SNAPSHOT h
         ON b.BASEL_ACCT_ID = h.BASEL_ACCT_ID
        AND h.MTH_TM_ID = __MTH_TM_ID__
-    LEFT JOIN emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR i
+    LEFT JOIN read_parquet('/PATH/TO/REVLVNG_CR_OBSVTN_PT_DRVD_VAR.parquet') i
         ON b.BASEL_ACCT_ID = i.BASEL_ACCT_ID
        AND i.OBSVTN_MTH_TM_ID = __MTH_TM_ID__
-       AND i.STREAM = '__STREAM__'
-    LEFT JOIN emulated.PSNL_LOAN_OBSVTN_PT_DRVD_VAR j
+    LEFT JOIN read_parquet('/PATH/TO/PSNL_LOAN_OBSVTN_PT_DRVD_VAR.parquet') j
         ON b.BASEL_ACCT_ID = j.BASEL_ACCT_ID
        AND j.OBSVTN_MTH_TM_ID = __MTH_TM_ID__
-       AND j.STREAM = '__STREAM__'
     LEFT JOIN emulated.STATUS_FINAL k
         ON TRY_CAST(h.MORT_NUM AS BIGINT) = k.MORTGAGE_NO
        AND a1.TM_LVL_END_DT = CAST(k.PROCESS_DATE AS DATE)
        AND CAST(k.PROCESS_DATE AS DATE) = DATE '__RUNDATE__'
-       AND k.STREAM = '__STREAM__'
     LEFT JOIN emulated.TWELVE_MON_DEF_WINDOW l
         ON TRY_CAST(h.MORT_NUM AS BIGINT) = l.MORTGAGE_NO
        AND a1.TM_LVL_END_DT = l.PROCESS_DATE
        AND l.PROCESS_DATE = DATE '__RUNDATE__'
-       AND l.STREAM = '__STREAM__'
     WHERE a.file_yr_mth = '__YYYYMM__'
       AND a.RELATION_CODE <> 'POA'
       AND COALESCE(a.PRODUCT, '') <> 'SEA'
@@ -315,7 +311,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--db", required=True, help="DuckDB database file with ingestion.* / emulated.* schemas")
     p.add_argument("--rundate", default="2026-05-31", help="month-end run date (default 2026-05-31)")
-    p.add_argument("--stream", required=True, help="STREAM value the emulated tables are partitioned by")
+    p.add_argument("--stream", default="", help="STREAM value stamped on the output (single stream; joins are not filtered)")
     p.add_argument("--out", default="cis_data_pop_02_20260531.parquet", help="output parquet path")
     p.add_argument("--mth-tm-id", type=int, default=None,
                    help="override TM_ID for the run month (else derived from ingestion.TM_DIM)")
@@ -338,7 +334,9 @@ def main():
                      f"Pass --mth-tm-id explicitly.")
         mth_tm_id = row[0]
 
-    print(f"rundate={rundate}  yyyymm={yyyymm}  mth_tm_id={mth_tm_id}  stream={args.stream}")
+    print(f"rundate={rundate}  yyyymm={yyyymm}  mth_tm_id={mth_tm_id}  stream={args.stream!r}")
+
+    # NOTE: hardcode the two obsvtn parquet paths in GATHER_SQL (read_parquet('/PATH/TO/...')).
 
     # Stage 1: gather -> temp table
     con.execute("CREATE OR REPLACE TEMP TABLE cis_gather AS " + sub(GATHER_SQL, rundate, args.stream, mth_tm_id, yyyymm))

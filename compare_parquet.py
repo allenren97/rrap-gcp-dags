@@ -30,7 +30,11 @@ Common options
     --ignore-columns X,Y    Exclude these columns from comparison.
     --sample 5              Print up to N example mismatches per column.
     --out-csv report.csv    Write the per-column benchmark to CSV.
-    --out-mismatches m.pq   Write mismatching rows (keys + both values) to parquet.
+    --out-mismatches m.csv  Write mismatching cells (keys + column + both values).
+                            .csv -> CSV, otherwise Parquet.
+    --out-diff-keys k.csv   Write the DISTINCT keys (e.g. account + mth_tm_id) that
+                            differ in any column, with a count and list of which
+                            columns differ. .csv -> CSV, otherwise Parquet.
 """
 import argparse
 import csv
@@ -58,7 +62,10 @@ def parse_args():
     p.add_argument("--ci-strings", action="store_true", help="case-insensitive text comparison")
     p.add_argument("--sample", type=int, default=0, help="print up to N example mismatches per column")
     p.add_argument("--out-csv", default="", help="write per-column benchmark to this CSV")
-    p.add_argument("--out-mismatches", default="", help="write mismatching rows to this parquet")
+    p.add_argument("--out-mismatches", default="",
+                   help="write mismatching cells (.csv -> CSV, else parquet)")
+    p.add_argument("--out-diff-keys", default="",
+                   help="write distinct keys that differ in any column (.csv -> CSV, else parquet)")
     return p.parse_args()
 
 
@@ -290,10 +297,25 @@ def main():
                 WHERE {both_present} AND NOT ({match_sql[col]})"""
             for col in comparable
         ]
+        fmt = "(FORMAT CSV, HEADER)" if args.out_mismatches.lower().endswith(".csv") else "(FORMAT PARQUET)"
         con.execute(
-            f"COPY ({' UNION ALL '.join(parts)}) TO {sql_str(args.out_mismatches)} (FORMAT PARQUET)"
+            f"COPY ({' UNION ALL '.join(parts)}) TO {sql_str(args.out_mismatches)} {fmt}"
         )
-        print(f"  wrote mismatching rows      -> {args.out_mismatches}")
+        print(f"  wrote mismatching cells     -> {args.out_mismatches}")
+
+    # ---- optional: distinct keys that differ in any column ---------------
+    if args.out_diff_keys:
+        key_show = ", ".join(qi(k) for k in join_keys)
+        any_diff = " OR ".join(f"NOT ({m})" for m in match_sql.values())
+        n_diff = " + ".join(f"CASE WHEN NOT ({m}) THEN 1 ELSE 0 END" for m in match_sql.values())
+        diff_cols = "concat_ws(', ', " + ", ".join(
+            f"CASE WHEN NOT ({m}) THEN {sql_str(col)} END" for col, m in match_sql.items()) + ")"
+        query = (f"SELECT {key_show}, ({n_diff}) AS n_diff_cols, {diff_cols} AS diff_cols "
+                 f"FROM _joined WHERE {both_present} AND ({any_diff})")
+        fmt = "(FORMAT CSV, HEADER)" if args.out_diff_keys.lower().endswith(".csv") else "(FORMAT PARQUET)"
+        con.execute(f"COPY ({query}) TO {sql_str(args.out_diff_keys)} {fmt}")
+        cnt = con.execute(f"SELECT count(*) FROM ({query})").fetchone()[0]
+        print(f"  wrote {cnt:,} differing key row(s) -> {args.out_diff_keys}")
 
     # ---- optional: CSV benchmark -----------------------------------------
     if args.out_csv:
