@@ -113,41 +113,56 @@ def export_gather(
         CASE WHEN a.product IN ('LOC','MOR','SCL','SPL','SSL','VAX','VCL','VFA','VFF','VGD','VIC','VLR','VUS','VZX','VZZ')
              THEN 1 ELSE 0 END AS lend_prods
     FROM emulated.CIS_DATA_NEW2 a
+    -- SAS :78. a1 = TM_DIM month whose start = file_date. file_yr_mth IN (&dt), where
+    -- &dt = put(mth_end_dt, yymmn4.) = the reporting month in YYMM form (e.g. '2605';
+    -- FILE_YR_MTH is VARCHAR(4) in prod). RIGHT(yyyymm,4) = '202605' -> '2605'.
     LEFT JOIN ingestion.TM_DIM a1
         ON a.file_date = a1.TM_LVL_ST_DT
        AND TRIM(a1.TM_LVL) = 'Month'
-       AND a.FILE_DATE = DATE_TRUNC('month', DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}')
+       AND a.FILE_YR_MTH = RIGHT('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}', 4)
+    -- SAS :79
     LEFT JOIN ingestion.BASEL_ACCT_DIM b
         ON LPAD(a.account, 23, '0') = b.ACCT_NUM
+    -- SAS :80-85. Redundant a1.TM_ID = X.MTH_TM_ID kept alongside X.MTH_TM_ID = &tm_id.
     LEFT JOIN emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS c
         ON b.BASEL_ACCT_ID = c.BASEL_ACCT_ID
+       AND a1.TM_ID = c.MTH_TM_ID
        AND c.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
        AND c.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     LEFT JOIN emulated.BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2 d
         ON b.BASEL_ACCT_ID = d.BASEL_ACCT_ID
+       AND a1.TM_ID = d.MTH_TM_ID
        AND d.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
        AND d.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     LEFT JOIN emulated.BASEL_MORT_ACCT_DRVD_VARS e
         ON b.BASEL_ACCT_ID = e.BASEL_ACCT_ID
+       AND a1.TM_ID = e.MTH_TM_ID
        AND e.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
        AND e.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     LEFT JOIN ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT f
         ON b.BASEL_ACCT_ID = f.BASEL_ACCT_ID
+       AND a1.TM_ID = f.MTH_TM_ID
        AND f.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
     LEFT JOIN ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT g
         ON b.BASEL_ACCT_ID = g.BASEL_ACCT_ID
+       AND a1.TM_ID = g.MTH_TM_ID
        AND g.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
     LEFT JOIN ingestion.BASEL_MORT_MTH_SNAPSHOT h
         ON b.BASEL_ACCT_ID = h.BASEL_ACCT_ID
+       AND a1.TM_ID = h.MTH_TM_ID
        AND h.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+    -- SAS :86-87. Redundant a1.TM_ID = X.OBSVTN_MTH_TM_ID kept alongside = &tm_id.
     LEFT JOIN emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR i
         ON b.BASEL_ACCT_ID = i.BASEL_ACCT_ID
+       AND a1.TM_ID = i.OBSVTN_MTH_TM_ID
        AND i.OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
        AND i.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     LEFT JOIN emulated.PSNL_LOAN_OBSVTN_PT_DRVD_VAR j
         ON b.BASEL_ACCT_ID = j.BASEL_ACCT_ID
+       AND a1.TM_ID = j.OBSVTN_MTH_TM_ID
        AND j.OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
        AND j.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
+    -- SAS :88-89. to_number(MORT_NUM,'9999999') -> TRY_CAST(... AS BIGINT).
     LEFT JOIN emulated.STATUS_FINAL k
         ON TRY_CAST(h.MORT_NUM AS BIGINT) = k.MORTGAGE_NO
        AND a1.TM_LVL_END_DT = CAST(k.PROCESS_DATE AS DATE)
@@ -158,7 +173,8 @@ def export_gather(
        AND a1.TM_LVL_END_DT = l.PROCESS_DATE
        AND l.PROCESS_DATE = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
        AND l.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
-    WHERE a.FILE_DATE = DATE_TRUNC('month', DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}')
+    -- SAS :90. isnull() -> COALESCE; RELATION_CODE guarded too (SAS ne keeps missing).
+    WHERE a.FILE_YR_MTH = RIGHT('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}', 4)
       AND COALESCE(a.RELATION_CODE, '') <> 'POA'
       AND COALESCE(a.PRODUCT, '') <> 'SEA'
       AND COALESCE(f.PRD_CD, '') NOT IN ('VFB', 'BLV')
