@@ -286,7 +286,7 @@ def export_result(
                             WHEN PIT_STAT_REV = 'CHG' THEN 'COMM_CHG'
                             WHEN COALESCE(PIT_STAT_REV, '') = '' THEN 'COMM_WO'
                         END
-                    WHEN product = 'SPL' AND COALESCE(COMM_FLG_SPL, '') <> '1' AND lend_prods = 1 THEN
+                    WHEN product = 'SPL' AND COALESCE(CAST(COMM_FLG_SPL AS VARCHAR), '') <> '1' AND lend_prods = 1 THEN
                         CASE
                             WHEN PIT_STAT_SPL = 'CUR' AND OS_BAL_AMT_SPL > 0 THEN 'CUR'
                             WHEN PIT_STAT_SPL = 'CUR' AND OS_BAL_AMT_SPL = 0 THEN 'CLO'
@@ -294,7 +294,7 @@ def export_result(
                             WHEN PIT_STAT_SPL = 'CHG' THEN 'CHG'
                             WHEN COALESCE(PIT_STAT_SPL, '') = '' THEN 'WO'
                         END
-                    WHEN product = 'SPL' AND COMM_FLG_SPL = '1' AND lend_prods = 1 THEN
+                    WHEN product = 'SPL' AND CAST(COMM_FLG_SPL AS VARCHAR) = '1' AND lend_prods = 1 THEN
                         CASE
                             WHEN PIT_STAT_SPL = 'CUR' AND OS_BAL_AMT_SPL > 0 THEN 'COMM_CUR'
                             WHEN PIT_STAT_SPL = 'CUR' AND OS_BAL_AMT_SPL = 0 THEN 'COMM_CLO'
