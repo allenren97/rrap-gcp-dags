@@ -68,7 +68,7 @@ def export_gather(
         d.PRD_ID                 AS PRD_ID_SPL,
         d.MODEL_EXCL_F           AS SCORECRD_EXCLSN_F_SPL,
         d.COMM_F_V2              AS COMM_FLG_SPL,
-        TRY_CAST(d.OS_BAL_AMT_V2 AS DECIMAL(17, 3)) AS OS_BAL_AMT_SPL,
+        NULLIF(TRY_CAST(d.OS_BAL_AMT_V2 AS DECIMAL(17, 3)), 0) AS OS_BAL_AMT_SPL,  -- 0 -> NULL (prod stores NULL, not 0)
         d.TREATMNT_F             AS PRD_TREATMNT_CD_SPL,
         g.RECD_STAT_CD           AS RECD_STAT_CD_SPL,  -- prod DDL: VARCHAR (not compared numerically)
         TRY_CAST(f.BNS_DLQNT_DAY AS INTEGER)        AS BNS_DLQNT_DAY_REV,
