@@ -10,14 +10,32 @@ Playbook for diagnosing a row-count mismatch between the generated
 | generated  | 55,536,627 |
 | **delta**  | **+190,057** (generated is larger, ~0.34%) |
 
-Generated has **more** rows. Every join in `export_gather` is a `LEFT JOIN`, so a
-larger count almost always means one joined table has **duplicate keys** and a single
-CIS row is being multiplied (fan-out). Sub in the run's `<M>` (`mth_tm_id`),
-`<s>` (`stream`), and `<rundate>`.
+## Invariant
+`custuniv_01` is a LEFT-JOIN enrichment **driven by `CIS_DATA_NEW2`**: the output must
+be **exactly one row per `CIS_DATA_NEW2` row that survives the `WHERE`** — never more.
+So `output rows == filtered CIS_DATA_NEW2 rows`. Prod's 55,346,570 IS that filtered
+count. `+190,057` is therefore either a fan-out or a base/filter difference.
 
-## 1. Confirm it is a fan-out (not a missing filter)
-The gather row count should equal the base CIS population after the WHERE filters.
-If `gather rows > base rows`, a join is fanning out.
+Sub in the run's `<M>` (`mth_tm_id`), `<s>` (`stream`), `<rundate>`, `<yyyymm>`.
+
+## 1. Fan-out vs base/filter difference
+Distinguish the two causes first:
+
+```sql
+SELECT
+    COUNT(*)                                         AS gather_rows,       -- 55,536,627?
+    COUNT(DISTINCT (a.account, a.cid, a.file_date))  AS distinct_cis_keys  -- true CIS grain
+FROM ingestion.CIS_DATA_NEW2 a
+WHERE a.file_yr_mth = '<yyyymm>' AND a.RELATION_CODE <> 'POA'
+  AND COALESCE(a.PRODUCT, '') <> 'SEA';
+```
+- `distinct_cis_keys == 55,346,570` -> **fan-out** (a join multiplies rows). Go to (2).
+- `distinct_cis_keys == 55,536,627` -> **base/filter difference** (extra CIS rows prod
+  drops -- most likely the `PRD_CD NOT IN ('VFB','BLV')` filter, applied in prod via the
+  revolving join, or the emulated CIS_DATA_NEW2 simply has extra rows).
+
+The base count *including* the revolving PRD_CD filter (this itself fans out if
+BASEL_ACCT_DIM / the revolving snapshot have dup keys):
 
 ```sql
 -- base population (SAS WHERE clause on CIS_DATA_NEW2 + the revolving PRD_CD filter)
