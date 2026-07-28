@@ -6,39 +6,39 @@ Playbook for diagnosing a row-count mismatch between the generated
 ## Observed (MAY ME)
 | | rows |
 |---|---|
-| `CIS_DATA_NEW2` (driving table, pre-filter) | 51,530,835 |
-| `CIS_DATA_POP_02` (generated)               | 55,536,627 |
-| **delta**                                   | **+4,005,792** (~8%) |
+| `CIS_DATA_NEW2` (driving table)   | 51,530,835 |
+| prod `CIS_DATA_POP_02`            | 55,203,202 |
+| rewrite `CIS_DATA_POP_02`         | 55,536,627 |
+| **gap (rewrite - prod)**          | **+333,425** (~0.6%) |
 
-The generated output exceeds the driving table's **raw** count. Since the `WHERE`
-clause can only *reduce* `CIS_DATA_NEW2`, the real fan-out is even larger than 4M
-(filters trim 51.5M, then a join multiplies it back up past 55.5M). Output exceeding
-the driving table is proof of a `LEFT JOIN` fan-out on its own -- no distinct-keys
-check needed. (An earlier 55.3M-vs-55.5M / +190K note compared the wrong month-end.)
-
-## Invariant
-`custuniv_01` is a LEFT-JOIN enrichment **driven by `CIS_DATA_NEW2`**: the output must
-be **exactly one row per `CIS_DATA_NEW2` row that survives the `WHERE`** — never more.
-So `output rows == filtered CIS_DATA_NEW2 rows`. Prod's 55,346,570 IS that filtered
-count. `+190,057` is therefore either a fan-out or a base/filter difference.
+## Grain note (NOT a 1:1 invariant)
+`custuniv_01` legitimately **expands** beyond `CIS_DATA_NEW2`: prod POP_02 (55.2M) is
+itself ~3.67M larger than `CIS_DATA_NEW2` (51.5M), so one `LEFT JOIN` is genuinely
+one-to-many -- most likely `b` (account dim), where one CIS `account` maps to several
+`BASEL_ACCT_ID`s. That ~4M expansion is expected. The real defect is the **+333,425**
+rows the rewrite has *over prod*: it fans out (or filters) differently on one join.
+Compare the two POP_02 outputs **at the row grain**, not against `CIS_DATA_NEW2`.
 
 Sub in the run's `<M>` (`mth_tm_id`), `<s>` (`stream`), `<rundate>`, `<yyyymm>`.
 
-## 1. Fan-out vs base/filter difference
-Distinguish the two causes first:
+## 1. Extra fan-out vs extra keys
+Two ways the rewrite can hold 333K more rows than prod:
 
 ```sql
-SELECT
-    COUNT(*)                                         AS gather_rows,       -- 55,536,627?
-    COUNT(DISTINCT (a.account, a.cid, a.file_date))  AS distinct_cis_keys  -- true CIS grain
-FROM ingestion.CIS_DATA_NEW2 a
-WHERE a.file_yr_mth = '<yyyymm>' AND a.RELATION_CODE <> 'POA'
-  AND COALESCE(a.PRODUCT, '') <> 'SEA';
+-- (a) EXTRA FAN-OUT: rewrite has duplicate grain-keys. Use the true POP_02 grain
+--     (e.g. BASEL_ACCT_ID, or (account, basel_acct_id)).
+SELECT BASEL_ACCT_ID, COUNT(*)
+FROM cbs.CIS_DATA_POP_02
+WHERE OBSN_DT = '<rundate>' AND STREAM = '<s>'
+GROUP BY 1 HAVING COUNT(*) > 1
+ORDER BY 2 DESC LIMIT 20;
 ```
-- `distinct_cis_keys == 55,346,570` -> **fan-out** (a join multiplies rows). Go to (2).
-- `distinct_cis_keys == 55,536,627` -> **base/filter difference** (extra CIS rows prod
-  drops -- most likely the `PRD_CD NOT IN ('VFB','BLV')` filter, applied in prod via the
-  revolving join, or the emulated CIS_DATA_NEW2 simply has extra rows).
+- (b) **EXTRA KEYS**: rewrite has grain-keys prod lacks (base/filter difference). Run
+  `compare_parquet.py --out-diff-keys` on the two POP_02 parquets; it lists the keys
+  present/duplicated on one side.
+
+If (a) returns dup keys -> a join fans out; find it with the probes in (2). If not, the
+333K are extra keys -> a WHERE filter differs (start with `PRD_CD NOT IN ('VFB','BLV')`).
 
 The base count *including* the revolving PRD_CD filter (this itself fans out if
 BASEL_ACCT_DIM / the revolving snapshot have dup keys):
