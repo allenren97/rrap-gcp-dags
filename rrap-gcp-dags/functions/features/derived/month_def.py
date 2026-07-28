@@ -70,6 +70,7 @@ source AS MATERIALIZED (
     LEFT JOIN features.PIT_STATUS_CROSS_DEFAULT_ORIG PIT ON
         RSN.BASEL_ACCT_ID = PIT.BASEL_ACCT_ID
         AND TM.TM_LVL_END_DT = PIT.OBSN_DT
+    WHERE TRIM(PIT.PIT_STATUS_CROSS_DEFAULT_ORIG) IN ('DEF', 'CHG')
 ),
 last_non_def AS (
     SELECT
@@ -153,7 +154,8 @@ def export_account_buckets(
         RSN.BASEL_ACCT_ID = PIT.BASEL_ACCT_ID
         AND TM.TM_LVL_END_DT = PIT.OBSN_DT
     WHERE 
-        TM.TM_LVL_END_DT = (SELECT run_dt FROM _bucket_params)
+        TM.TM_LVL_END_DT = (SELECT run_dt FROM _bucket_params) 
+        AND PIT.PIT_STATUS_CROSS_DEFAULT_ORIG IN ('DEF', 'CHG')
     """
 ):
     pass
@@ -218,89 +220,47 @@ def export_spl(
         INNER JOIN {UPSTREAM_ASSET[4]} PSNL ON
             PIT.BASEL_ACCT_ID = PSNL.BASEL_ACCT_ID
             AND TM.TM_ID = PSNL.MTH_TM_ID
-    ),
-
-    ordered AS (
+        WHERE TRIM(PIT.PIT_STATUS_CROSS_DEFAULT_ORIG) IN ('DEF', 'CHG')
+        ),
+        def_block AS (
+            SELECT BASEL_ACCT_ID, COUNT(*) AS CONS_COUNT
+            FROM (
+                SELECT
+                    BASEL_ACCT_ID,
+                    PIT_STATUS,
+                    MTH_TM_ID,
+                    CASE WHEN PIT_STATUS IN ('DEF','CHG') THEN 1 ELSE 0 END AS IS_DEF,
+                    SUM(CASE WHEN PIT_STATUS IN ('CUR','CLO') OR PIT_STATUS IS NULL THEN 1 ELSE 0 END)
+                    OVER (PARTITION BY BASEL_ACCT_ID ORDER BY MTH_TM_ID DESC ROWS UNBOUNDED PRECEDING) AS BREAK_AFTER
+                FROM source
+                WHERE MTH_TM_ID < {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+            ) sub
+            WHERE IS_DEF = 1 AND BREAK_AFTER = 0
+            GROUP BY BASEL_ACCT_ID
+        ),
+        final AS (
+            SELECT
+                s.BASEL_ACCT_ID,
+                s.MTH_TM_ID,
+                s.PIT_STATUS,
+                CASE
+                    WHEN s.MTH_TM_ID != {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}} THEN NULL
+                    WHEN s.PIT_STATUS IS NULL THEN NULL
+                    WHEN s.PIT_STATUS IN ('DEF','CHG') THEN COALESCE(db.CONS_COUNT, 0)
+                    WHEN s.PIT_STATUS = 'CUR' THEN NULL
+                    ELSE NULL
+                END AS MONTH_DEF
+            FROM source s
+            LEFT JOIN def_block db ON s.BASEL_ACCT_ID = db.BASEL_ACCT_ID
+        )
         SELECT
+            '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
             BASEL_ACCT_ID,
-            MTH_TM_ID,
-            PIT_STATUS,
-
-            LEAD(MTH_TM_ID) OVER (
-                PARTITION BY BASEL_ACCT_ID
-                ORDER BY MTH_TM_ID DESC
-            ) AS PREV_MTH_TM_ID
-
-        FROM source
+            MONTH_DEF,
+            'SPL' AS SRC_SYS_CD
+        FROM final
         WHERE
-            MTH_TM_ID <= {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
-
-            -- Note the "<=" inclusive operator here - current month's DEF/CHG
-            -- is included in the consecutive default count. This aligns SPL
-            -- logic with baseline behavior where a new default in the current
-            -- month correctly results in MONTH_DEF = 1.
-    ),
-
-    last_break AS (
-        SELECT
-            BASEL_ACCT_ID,
-            MAX(MTH_TM_ID) AS LAST_BREAK_MTH_TM_ID
-        FROM ordered
-        WHERE
-            PIT_STATUS IN ('CUR', 'CLO')
-            OR PIT_STATUS IS NULL
-
-            -- Break the consecutive default streak when monthly
-            -- snapshots are missing. This mirrors the PROD SAS behavior
-            -- where cons_mths_default is derived from the immediately
-            -- preceding month only. If one or more months are absent,
-            -- the default sequence restarts at the current DEF/CHG month.
-            OR (
-                PREV_MTH_TM_ID IS NOT NULL
-                AND MTH_TM_ID - PREV_MTH_TM_ID <> 40
-            )
-        GROUP BY BASEL_ACCT_ID
-    ),
-
-    def_block AS (
-        SELECT
-            o.BASEL_ACCT_ID,
-            COUNT(*) AS CONS_COUNT
-        FROM ordered o
-        LEFT JOIN last_break b ON
-            o.BASEL_ACCT_ID = b.BASEL_ACCT_ID
-        WHERE
-            o.PIT_STATUS IN ('DEF', 'CHG')
-            AND (
-                b.LAST_BREAK_MTH_TM_ID IS NULL
-                OR o.MTH_TM_ID >= b.LAST_BREAK_MTH_TM_ID
-            )
-        GROUP BY o.BASEL_ACCT_ID
-    ),
-
-    final AS (
-        SELECT
-            s.BASEL_ACCT_ID,
-            s.MTH_TM_ID,
-            s.PIT_STATUS,
-            CASE
-                WHEN s.PIT_STATUS IN ('DEF', 'CHG')
-                    THEN COALESCE(db.CONS_COUNT, 0)
-                ELSE 0
-            END AS MONTH_DEF
-        FROM source s
-        LEFT JOIN def_block db ON
-            s.BASEL_ACCT_ID = db.BASEL_ACCT_ID
-    )
-
-    SELECT
-        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
-        BASEL_ACCT_ID,
-        MONTH_DEF,
-        'SPL' AS SRC_SYS_CD
-    FROM final
-    WHERE
-        MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+            MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
     """
 ):
     pass
