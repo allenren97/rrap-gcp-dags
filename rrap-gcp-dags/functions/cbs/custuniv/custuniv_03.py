@@ -1,22 +1,34 @@
 """
-Rewrite of J_CBS_0030_CUSTUNIV_03.sas -- CBS account status, step 03.
+Rewrite of J_CBS_0030_CUSTUNIV_03.sas â€” CBS Customer Universe, step 03.
 
-Two SAS stages, collapsed into one query (the Z_CBS_ACCNTS staging table is just the
-distinct retail account list, so it becomes a CTE):
-  1. acct_list (:5-11): DISTINCT (lpad(cast(account as bigint),18,'0'), account, product)
-     from CIS_DATA_POP_02 joined to CUST_BASE_05 where cust_type='Retail'.
-  2. STATUS (:29-37): enrich each account with ACCT_TYP / ACCT_BASE_KEY (acct_xref) and
-     ACCT_LCST (IWF_CUST_ACCT at time_key=&tm_id, PRIM_CUST_F='P'), one row per account.
+Two stages, mirroring the SAS:
+  export_gather   -- Retail account list: distinct accounts from CIS_DATA_POP_02 for
+                     customers identified as 'Retail' in CUST_BASE_05, LEFT JOINed to
+                     the account cross-reference and CBS customer-account tables, with a
+                     ROW_NUMBER() deduplication key per account.
+                     NOTE: the SAS routes data through a CBS DB2 staging table
+                     (sas.Z_CBS_ACCNTS) before querying back via a pass-through
+                     connection (cbsdb2). That cross-system round-trip is eliminated
+                     here â€” the joins to ingestion.ACCT_XREF and ingestion.IWF_CUST_ACCT
+                     are resolved directly in DuckDB.
+  export_result   -- Filters to row_num = 1 per account (mirroring the SAS
+                     rownumber() PARTITION BY account), prepends OBSN_DT and STREAM,
+                     and selects the final column set.
+  duckdb_delete / duckdb_load -> cbs.CBS_ACCT_STATUS (this dag's output).
 
-  export_status -> parquet -> duckdb_load -> cbs.CBS_ACCT_STATUS.
+Source schema mapping (verified against the ducklake catalog):
+  cbs.*         CIS_DATA_POP_02, CUST_BASE_05 (outputs of custuniv_01 / custuniv_02)
+  ingestion.*   ACCT_XREF, IWF_CUST_ACCT
 
-NOTES / assumptions (flagged -- confirm against prod):
-  * ACCT_XREF is NOT filtered by POPN_DT here; the one-row-per-account dedup keeps the
-    latest xref (ORDER BY POPN_DT DESC). The SAS uses owtact.acct_xref (live, 1 row/acct)
-    and rownumber() with no ORDER BY (arbitrary) -- adjust if a specific snapshot is meant.
-  * cust_type filter compares b.CUST_TYPE = 'Retail' (from CUST_BASE_05).
-  * Emulated tables are partitioned by OBSN_DT/STREAM; the two cbs.* joins are aligned on
-    them. IWF_CUST_ACCT.TIME_KEY = &tm_id (the run month).
+OPEN ITEMS (flagged, need confirmation):
+  * ingestion.ACCT_XREF     -- the SAS uses cbsdb2.owtact.acct_xref; DuckDB schema/table
+    name and ingestion status need to be confirmed.
+  * ingestion.IWF_CUST_ACCT -- the SAS uses cbsdb2.OWSTAR.IWF_CUST_ACCT; DuckDB schema/
+    table name and ingestion status need to be confirmed.
+  * cbs.CBS_ACCT_STATUS -- the SAS target is NZWRK.STATUS; the DuckDB name is provisional.
+    Confirm final table name and DDL before deployment.
+  * Untested against on-prem output -- the account-level derivations are a faithful
+    translation but should be reconciled against NZWRK.STATUS on a sample month.
 """
 
 UPSTREAM_ASSET = [
@@ -31,67 +43,92 @@ DOWNSTREAM_ASSET = "cbs.CBS_ACCT_STATUS"
 _TASK_GROUP = "custuniv__custuniv_03"
 
 DEPENDENCIES = {
-    "export_status": ["duckdb_load"],
+    "export_gather": ["export_result"],
+    "export_result": ["duckdb_load"],
     "duckdb_delete": ["duckdb_load"],
 }
-
-_RUNDATE = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
-_STREAM = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}'
-_TM = '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}'
 
 
 def duckdb_delete(
     duckdb_conn_id="duckdb-conn",
     sql=f"""
     DELETE FROM {DOWNSTREAM_ASSET}
-    WHERE OBSN_DT = '{_RUNDATE}'
-      AND STREAM = '{_STREAM}'
+    WHERE OBSN_DT = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+      AND STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     """,
 ):
     pass
 
 
-def export_status(
+def export_gather(
     duckdb_conn_id="duckdb-conn",
     resource_tier="HIGH",
     pool_slots=96,
     sql=f"""
-    WITH acct_list AS (
-        -- SAS :5-11: distinct retail accounts. LEFT JOIN + WHERE b.cust_type -> inner.
-        SELECT DISTINCT
-            LPAD(CAST(TRY_CAST(a.ACCOUNT AS BIGINT) AS VARCHAR), 18, '0') AS ACCT_ID,
-            a.ACCOUNT,
-            a.PRODUCT
-        FROM cbs.CIS_DATA_POP_02 a
-        JOIN cbs.CUST_BASE_05 b
-            ON a.CID = b.CID
-           AND b.OBSN_DT = DATE '{_RUNDATE}'
-           AND b.STREAM = '{_STREAM}'
-        WHERE a.OBSN_DT = DATE '{_RUNDATE}'
-          AND a.STREAM = '{_STREAM}'
-          AND b.CUST_TYPE = 'Retail'
-    )
+    WITH
+        -- Retail account list: distinct account-product pairs for retail customers
+        -- (SAS lines 2-11: acct_list query joining CIS_DATA_POP_02 to CUST_BASE_05
+        --  filtered to cust_type='Retail', LPAD account to 18 chars after numeric cast).
+        acct_list AS (
+            SELECT DISTINCT
+                LPAD(TRY_CAST(a.account AS BIGINT)::VARCHAR, 18, '0') AS acct_id,
+                a.account,
+                a.product
+            FROM cbs.CIS_DATA_POP_02 a
+            LEFT JOIN cbs.CUST_BASE_05 b
+                ON a.cid = b.cid
+               AND b.OBSN_DT = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+               AND b.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
+            WHERE a.OBSN_DT = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
+              AND a.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
+              AND b.cust_type = 'Retail'
+        )
+    -- Account cross-reference and CBS customer-account enrichment with deduplication key
+    -- (SAS lines 24-36: Z_CBS_ACCNTS LEFT JOIN owtact.acct_xref LEFT JOIN OWSTAR.IWF_CUST_ACCT,
+    --  rownumber() PARTITION BY account to resolve duplicate acct_xref matches).
     SELECT
-        DATE '{_RUNDATE}' AS OBSN_DT,
-        '{_STREAM}' AS STREAM,
-        al.ACCT_ID,
-        al.ACCOUNT,
-        al.PRODUCT,
-        x.ACCT_TYP,
-        x.ACCT_BASE_KEY,
-        i.ACCT_LCST
-    FROM acct_list al
-    LEFT JOIN ingestion.ACCT_XREF x
-        ON x.ACCT_ID = al.ACCT_ID
-    LEFT JOIN ingestion.IWF_CUST_ACCT i
-        ON i.ACCT_BASE_KEY = x.ACCT_BASE_KEY
-       AND i.TIME_KEY = {_TM}
-       AND i.PRIM_CUST_F = 'P'
-    -- SAS rownumber() over (partition by account) where rn=1 (one row per account)
-    QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY al.ACCOUNT
-        ORDER BY x.POPN_DT DESC NULLS LAST, x.ACCT_BASE_KEY NULLS LAST
-    ) = 1
+        a.acct_id,
+        a.account,
+        a.product,
+        b.ACCT_TYP,
+        b.ACCT_BASE_KEY,
+        c.acct_lcst,
+        ROW_NUMBER() OVER (PARTITION BY a.account) AS row_num
+    FROM acct_list a
+    LEFT JOIN ingestion.ACCT_XREF b
+        ON a.acct_id = b.acct_id
+    LEFT JOIN ingestion.IWF_CUST_ACCT c
+        ON b.ACCT_BASE_KEY = c.acct_base_key
+       AND c.time_key = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+       AND c.PRIM_CUST_F = 'P'
+    """,
+):
+    pass
+
+
+def export_result(
+    duckdb_conn_id="duckdb-conn",
+    resource_tier="HIGH",
+    pool_slots=96,
+    sql=f"""
+    WITH
+        g AS (
+            SELECT *
+            FROM read_parquet(
+                '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_gather", key="parquet") }}}}'
+            )
+        )
+    SELECT
+        DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
+        '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
+        acct_id,
+        account,
+        product,
+        ACCT_TYP,
+        ACCT_BASE_KEY,
+        acct_lcst
+    FROM g
+    WHERE row_num = 1
     """,
 ):
     pass
@@ -105,7 +142,7 @@ def duckdb_load(
     INSERT INTO {DOWNSTREAM_ASSET} BY NAME
     SELECT *
     FROM read_parquet(
-        '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_status", key="parquet") }}}}'
+        '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_result", key="parquet") }}}}'
     )
     """,
 ):

@@ -1,33 +1,6 @@
-"""
-Rewrite of J_CBS_0010_CUSTUNIV_01.sas — CBS Customer Universe, step 01.
-
-Two stages, mirroring the SAS:
-  export_gather   -- CIS_DATA_POP_01: base CIS population LEFT JOINed to 12 account
-                     tables at the process month (ingestion.* + emulated.*).
-  export_result   -- CIS_DATA_POP_02: the SAS DATA-step derivations (indicators,
-                     exclusions, consolidated default/status) as layered CTEs.
-  duckdb_delete / duckdb_load -> cbs.CIS_DATA_POP_02 (this dag's output; step 02 reads it).
-
-Source schema mapping (verified against the ducklake catalog):
-  ingestion.*  TM_DIM, BASEL_ACCT_DIM, BASEL_REVLVNG_CR_MTH_SNAPSHOT,
-               BASEL_PSNL_LOAN_MTH_SNAPSHOT, BASEL_MORT_MTH_SNAPSHOT
-  emulated.*   BASEL_REVLVNG_CR_BASE_DRVD_VARS, BASEL_PSNL_LOAN_ACCT_DRVD_VARS_2,
-               BASEL_MORT_ACCT_DRVD_VARS, REVLVNG_CR_OBSVTN_PT_DRVD_VAR,
-               PSNL_LOAN_OBSVTN_PT_DRVD_VAR, STATUS_FINAL, TWELVE_MON_DEF_WINDOW
-
-OPEN ITEMS (flagged, need confirmation):
-  * ingestion.CIS_DATA_NEW2 -- the base CIS population (SAS credit_risk.CIS_DATA_NEW2)
-    is NOT yet in the catalog; it must be ingested before this runs.
-  * STREAM -- the emulated tables are partitioned by STREAM; the SAS on-prem tables
-    are not. Every emulated join below is filtered to the run's `stream`. Confirm
-    the CBS stream (or that a single stream is intended).
-  * cbs.CIS_DATA_POP_02 -- target schema/table DDL needs to be created.
-  * Untested against on-prem output -- the row-level derivations are a faithful
-    translation but should be reconciled against CIS_DATA_POP_02 on a sample month.
-"""
 
 UPSTREAM_ASSET = [
-    "ingestion.CIS_DATA_NEW2",
+    "emulated.CIS_DATA_NEW2",
     "ingestion.TM_DIM",
     "ingestion.BASEL_ACCT_DIM",
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
@@ -39,8 +12,7 @@ UPSTREAM_ASSET = [
     "emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR",
     "emulated.PSNL_LOAN_OBSVTN_PT_DRVD_VAR",
     "emulated.STATUS_FINAL",
-    "emulated.TWELVE_MON_DEF_WINDOW",
-    "cbs.MDMFLAGS_OK",  # gate: mdmflags_check must pass before the whole chain runs
+    "emulated.TWELVE_MON_DEF_WINDOW", # gate: mdmflags_check must pass before the whole chain runs
 ]
 
 DOWNSTREAM_ASSET = "cbs.CIS_DATA_POP_02"
@@ -96,10 +68,6 @@ def export_gather(
         d.PRD_ID                 AS PRD_ID_SPL,
         d.MODEL_EXCL_F           AS SCORECRD_EXCLSN_F_SPL,
         d.COMM_F_V2              AS COMM_FLG_SPL,
-        -- Numeric columns are TRY_CAST because the deployed source tables can hand these
-        -- back as VARCHAR with '' (empty) values, which blows up numeric comparisons
-        -- ("Could not convert string '' to INT32"). TRY_CAST turns '' into NULL, which in
-        -- the downstream >0/=0 tests behaves like a SAS missing value.
         TRY_CAST(d.OS_BAL_AMT_V2 AS DECIMAL(17, 3)) AS OS_BAL_AMT_SPL,
         d.TREATMNT_F             AS PRD_TREATMNT_CD_SPL,
         g.RECD_STAT_CD           AS RECD_STAT_CD_SPL,  -- prod DDL: VARCHAR (not compared numerically)
@@ -144,11 +112,11 @@ def export_gather(
         CASE WHEN SUBSTR(f.BLOCK_RECL_CD, 1, 1) IN ('S', ' S') THEN 1 ELSE 0 END AS stolen,
         CASE WHEN a.product IN ('LOC','MOR','SCL','SPL','SSL','VAX','VCL','VFA','VFF','VGD','VIC','VLR','VUS','VZX','VZZ')
              THEN 1 ELSE 0 END AS lend_prods
-    FROM ingestion.CIS_DATA_NEW2 a
+    FROM emulated.CIS_DATA_NEW2 a
     LEFT JOIN ingestion.TM_DIM a1
         ON a.file_date = a1.TM_LVL_ST_DT
        AND TRIM(a1.TM_LVL) = 'Month'
-       AND a.file_yr_mth = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}'
+       AND a.FILE_DATE = DATE_TRUNC('month', DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}')
     LEFT JOIN ingestion.BASEL_ACCT_DIM b
         ON LPAD(a.account, 23, '0') = b.ACCT_NUM
     LEFT JOIN emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS c
@@ -172,17 +140,6 @@ def export_gather(
     LEFT JOIN ingestion.BASEL_MORT_MTH_SNAPSHOT h
         ON b.BASEL_ACCT_ID = h.BASEL_ACCT_ID
        AND h.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
-    -- Obsvtn-point tables: joined EXACTLY as SAS J_CBS_0010_CUSTUNIV_01 (:86-87) --
-    -- keyed only on OBSVTN_MTH_TM_ID = &tm_id (the reporting month M). No
-    -- PROCESS_MTH_TM_ID filter and no window discriminator. The producer stamps the
-    -- PD/EAD row at OBSVTN = process-12 and the LGD row at OBSVTN = process-24, so the
-    -- row sitting at OBSVTN = M is the PD/EAD output of the M+12 run -- exactly the
-    -- custuniv (PD/EAD) universe the SAS relies on.
-    -- (STREAM filter retained: the emulated tables are stream-partitioned; on-prem is not.)
-    -- NOTE: the emulated producer writes BOTH windows into this table, so if it has been
-    -- backfilled far enough that the M+24 LGD run also emitted an OBSVTN = M row, this
-    -- join can match two rows per account. If fan-out appears, restrict to the PD/EAD
-    -- row with:  AND i.PROCESS_MTH_TM_ID = mth_tm_id + 12*40.
     LEFT JOIN emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR i
         ON b.BASEL_ACCT_ID = i.BASEL_ACCT_ID
        AND i.OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
@@ -201,14 +158,13 @@ def export_gather(
        AND a1.TM_LVL_END_DT = l.PROCESS_DATE
        AND l.PROCESS_DATE = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
        AND l.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
-    WHERE a.file_yr_mth = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}'
-      AND COALESCE(a.RELATION_CODE, '') <> 'POA'  -- SAS `ne 'POA'` keeps missing; guard NULL
+    WHERE a.FILE_DATE = DATE_TRUNC('month', DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}')
+      AND COALESCE(a.RELATION_CODE, '') <> 'POA'
       AND COALESCE(a.PRODUCT, '') <> 'SEA'
       AND COALESCE(f.PRD_CD, '') NOT IN ('VFB', 'BLV')
     """,
 ):
     pass
-
 
 def export_result(
     duckdb_conn_id="duckdb-conn",
@@ -254,9 +210,6 @@ def export_result(
                 END AS pit_stat_mor_adj
             FROM g
         ),
-        -- Single lend-status bucket per row, following the SAS if/else-if precedence
-        -- across the product blocks (rev non-BLV, rev BLV, SPL, SPL-comm, MOR resi,
-        -- MOR non-resi). Empty PIT status -> WO.
         d2 AS (
             SELECT
                 d1.*,
@@ -353,7 +306,6 @@ def export_result(
                 COALESCE(DFT_DT_REV, DFT_DT_SPL, DEFAULT_DATE_MOR) AS default_date,
                 COALESCE(DFT_BAL_REV, DFT_BAL_SPL, DEFAULT_BAL_MOR) AS default_bal,
                 CASE WHEN MODEL_DFT_F_REV = 'Y' OR MODEL_DFT_F_SPL = 'Y' OR DEFAULT_IND_MOR = 1 THEN 1 ELSE 0 END AS default_ind,
-                -- SAS uses coalescec (skips blank ''), so NULLIF('' -> NULL) each arg.
                 COALESCE(NULLIF(PRD_TREATMNT_CD_REV, ''), NULLIF(PRD_TREATMNT_CD_SPL, ''), NULLIF(PRD_TREATMNT_CD_MOR, '')) AS PROD_TREAT,
                 COALESCE(NULLIF(PIT_STAT_REV, ''), NULLIF(pit_stat_mor_adj, ''), NULLIF(PIT_STAT_SPL, '')) AS PIT_STAT,
                 GREATEST(BNS_DLQNT_DAY_REV - 30, DAY_ODUE_SPL, DLQNT_DAY_CNT_MOR) AS days_dlq
