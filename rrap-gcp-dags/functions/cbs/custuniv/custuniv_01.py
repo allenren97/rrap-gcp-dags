@@ -202,7 +202,7 @@ def export_gather(
        AND l.PROCESS_DATE = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
        AND l.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     WHERE a.file_yr_mth = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}'
-      AND a.RELATION_CODE <> 'POA'
+      AND COALESCE(a.RELATION_CODE, '') <> 'POA'  -- SAS `ne 'POA'` keeps missing; guard NULL
       AND COALESCE(a.PRODUCT, '') <> 'SEA'
       AND COALESCE(f.PRD_CD, '') NOT IN ('VFB', 'BLV')
     """,
@@ -353,8 +353,9 @@ def export_result(
                 COALESCE(DFT_DT_REV, DFT_DT_SPL, DEFAULT_DATE_MOR) AS default_date,
                 COALESCE(DFT_BAL_REV, DFT_BAL_SPL, DEFAULT_BAL_MOR) AS default_bal,
                 CASE WHEN MODEL_DFT_F_REV = 'Y' OR MODEL_DFT_F_SPL = 'Y' OR DEFAULT_IND_MOR = 1 THEN 1 ELSE 0 END AS default_ind,
-                COALESCE(PRD_TREATMNT_CD_REV, PRD_TREATMNT_CD_SPL, PRD_TREATMNT_CD_MOR) AS PROD_TREAT,
-                COALESCE(PIT_STAT_REV, pit_stat_mor_adj, PIT_STAT_SPL) AS PIT_STAT,
+                -- SAS uses coalescec (skips blank ''), so NULLIF('' -> NULL) each arg.
+                COALESCE(NULLIF(PRD_TREATMNT_CD_REV, ''), NULLIF(PRD_TREATMNT_CD_SPL, ''), NULLIF(PRD_TREATMNT_CD_MOR, '')) AS PROD_TREAT,
+                COALESCE(NULLIF(PIT_STAT_REV, ''), NULLIF(pit_stat_mor_adj, ''), NULLIF(PIT_STAT_SPL, '')) AS PIT_STAT,
                 GREATEST(BNS_DLQNT_DAY_REV - 30, DAY_ODUE_SPL, DLQNT_DAY_CNT_MOR) AS days_dlq
             FROM d3
         ),
@@ -373,7 +374,7 @@ def export_result(
                 -- MODEL_EXCL: consolidated exclusion, with SSL/VUS-without-block override.
                 CASE
                     WHEN product IN ('SSL','VUS') AND COALESCE(BLOCK_RECL_CD, '') = '' THEN 'N'
-                    ELSE COALESCE(SCORECRD_EXCLSN_F_REV, SCORECRD_EXCLSN_F_SPL, SCORECRD_EXCLSN_F_MOR)
+                    ELSE COALESCE(NULLIF(SCORECRD_EXCLSN_F_REV, ''), NULLIF(SCORECRD_EXCLSN_F_SPL, ''), NULLIF(SCORECRD_EXCLSN_F_MOR, ''))
                 END AS MODEL_EXCL
             FROM d4
         )
