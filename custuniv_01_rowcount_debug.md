@@ -3,12 +3,18 @@
 Playbook for diagnosing a row-count mismatch between the generated
 `cbs.CIS_DATA_POP_02` and production `CIS_DATA_POP_02`.
 
-## Observed
+## Observed (MAY ME)
 | | rows |
 |---|---|
-| production | 55,346,570 |
-| generated  | 55,536,627 |
-| **delta**  | **+190,057** (generated is larger, ~0.34%) |
+| `CIS_DATA_NEW2` (driving table, pre-filter) | 51,530,835 |
+| `CIS_DATA_POP_02` (generated)               | 55,536,627 |
+| **delta**                                   | **+4,005,792** (~8%) |
+
+The generated output exceeds the driving table's **raw** count. Since the `WHERE`
+clause can only *reduce* `CIS_DATA_NEW2`, the real fan-out is even larger than 4M
+(filters trim 51.5M, then a join multiplies it back up past 55.5M). Output exceeding
+the driving table is proof of a `LEFT JOIN` fan-out on its own -- no distinct-keys
+check needed. (An earlier 55.3M-vs-55.5M / +190K note compared the wrong month-end.)
 
 ## Invariant
 `custuniv_01` is a LEFT-JOIN enrichment **driven by `CIS_DATA_NEW2`**: the output must
