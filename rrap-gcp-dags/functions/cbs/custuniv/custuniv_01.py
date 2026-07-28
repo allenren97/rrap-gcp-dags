@@ -102,7 +102,7 @@ def export_gather(
         -- the downstream >0/=0 tests behaves like a SAS missing value.
         TRY_CAST(d.OS_BAL_AMT_V2 AS DECIMAL(17, 3)) AS OS_BAL_AMT_SPL,
         d.TREATMNT_F             AS PRD_TREATMNT_CD_SPL,
-        TRY_CAST(g.RECD_STAT_CD AS INTEGER)         AS RECD_STAT_CD_SPL,
+        g.RECD_STAT_CD           AS RECD_STAT_CD_SPL,  -- prod DDL: VARCHAR (not compared numerically)
         TRY_CAST(f.BNS_DLQNT_DAY AS INTEGER)        AS BNS_DLQNT_DAY_REV,
         TRY_CAST(g.DAY_ODUE AS INTEGER)             AS DAY_ODUE_SPL,
         TRY_CAST(e.DLQNT_DAY_CNT AS INTEGER)        AS DLQNT_DAY_CNT_MOR,
@@ -329,6 +329,9 @@ def export_result(
                 CASE WHEN lend_bucket = 'DEF' THEN 1 ELSE 0 END AS lend_prods_DEF,
                 CASE WHEN lend_bucket = 'CHG' THEN 1 ELSE 0 END AS lend_prods_CHG,
                 CASE WHEN lend_bucket = 'WO'  THEN 1 ELSE 0 END AS lend_prods_WO,
+                -- SAS inits lend_prods_COMM=0 and never sets it (custuniv_01.sas:123); kept
+                -- for schema parity with prod CIS_DATA_POP_02 (col 59).
+                0 AS lend_prods_COMM,
                 CASE WHEN lend_bucket = 'COMM_CUR' THEN 1 ELSE 0 END AS lend_prods_COMM_CUR,
                 CASE WHEN lend_bucket = 'COMM_CLO' THEN 1 ELSE 0 END AS lend_prods_COMM_CLO,
                 CASE WHEN lend_bucket = 'COMM_DEF' THEN 1 ELSE 0 END AS lend_prods_COMM_DEF,
