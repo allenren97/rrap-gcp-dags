@@ -3,6 +3,7 @@ UPSTREAM_ASSET = [
     "emulated.CIS_DATA_NEW2",
     "ingestion.TM_DIM",
     "ingestion.BASEL_ACCT_DIM",
+    "ingestion.KQ_TKQ_KS_TSYS_XREF",
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
     "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
     "ingestion.BASEL_MORT_MTH_SNAPSHOT",
@@ -56,6 +57,20 @@ def export_gather(
     resource_tier="HIGH",
     pool_slots=96,
     sql=f"""
+    WITH tsys_excl AS (
+        -- SAS J_CBS_0010_CUSTUNIV_01_DEC (:80-83): TSYS end-of-chain accounts
+        -- (TSYS_CUST_TYPE_CD='0'). Excluded from branch 1 and handled REV-only in branch 2.
+        -- Keyed by BOTH the TSYS and BCM account numbers, LPAD'd to 23.
+        SELECT LPAD(TSYS_ACCT_ID, 23, '0') AS acct_key
+        FROM ingestion.KQ_TKQ_KS_TSYS_XREF
+        WHERE END_OF_CHAIN_INDICATOR = 'Y' AND TSYS_CUST_TYPE_CD = '0'
+        UNION
+        SELECT LPAD(BCM_ACCT_NUM, 23, '0')
+        FROM ingestion.KQ_TKQ_KS_TSYS_XREF
+        WHERE END_OF_CHAIN_INDICATOR = 'Y' AND TSYS_CUST_TYPE_CD = '0'
+    )
+    -- Branch 1 (SAS ..._DEC :5-98): CIS accounts EXCLUDING the TSYS end-of-chain set --
+    -- full multi-product join.
     SELECT
         a.*,
         a1.TM_ID AS mth_tm_id,
@@ -173,7 +188,103 @@ def export_gather(
        AND a1.TM_LVL_END_DT = l.PROCESS_DATE
        AND l.PROCESS_DATE = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
        AND l.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
-    -- SAS :90. isnull() -> COALESCE; RELATION_CODE guarded too (SAS ne keeps missing).
+    -- SAS :90 + branch-1 restriction: exclude the TSYS end-of-chain accounts (they go to branch 2).
+    WHERE a.FILE_YR_MTH = RIGHT('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}', 4)
+      AND COALESCE(a.RELATION_CODE, '') <> 'POA'
+      AND COALESCE(a.PRODUCT, '') <> 'SEA'
+      AND COALESCE(f.PRD_CD, '') NOT IN ('VFB', 'BLV')
+      AND LPAD(a.account, 23, '0') NOT IN (SELECT acct_key FROM tsys_excl)
+
+    UNION
+
+    -- Branch 2 (SAS ..._DEC :102-181): the excluded TSYS end-of-chain accounts, re-keyed to
+    -- BASEL_ACCT_DIM via BCM_ACCT_NUM (not a.account) and joined REV-only (c/f/i). Every
+    -- SPL and MOR column is NULL to line up with branch 1's column list for the UNION.
+    SELECT
+        a.*,
+        a1.TM_ID AS mth_tm_id,
+        a1.TM_LVL_END_DT AS process_date,
+        b.BASEL_ACCT_ID,
+        c.PIT_STAT_VER_2_CD      AS PIT_STAT_REV,
+        c.CONSM_PRD_TREATMNT_CD  AS PRD_TREATMNT_CD_REV,
+        c.CONSM_SCORECRD_EXCLSN_F AS SCORECRD_EXCLSN_F_REV,
+        NULL AS PIT_STAT_SPL,
+        NULL AS PRD_ID_SPL,
+        NULL AS SCORECRD_EXCLSN_F_SPL,
+        NULL AS COMM_FLG_SPL,
+        NULL AS OS_BAL_AMT_SPL,
+        NULL AS PRD_TREATMNT_CD_SPL,
+        NULL AS RECD_STAT_CD_SPL,
+        TRY_CAST(f.BNS_DLQNT_DAY AS INTEGER) AS BNS_DLQNT_DAY_REV,
+        NULL AS DAY_ODUE_SPL,
+        NULL AS DLQNT_DAY_CNT_MOR,
+        NULL AS PIT_STAT_MOR,
+        NULL AS SCORECRD_EXCLSN_F_MOR,
+        NULL AS LRA_STATUS_MOR,
+        NULL AS PAID_OFF_DATE_MOR,
+        NULL AS CURRENT_BAL_MOR,
+        NULL AS TOTAL_SUSPENSE_MOR,
+        NULL AS PRD_TREATMNT_CD_MOR,
+        NULL AS COMM_TP_CD_MOR,
+        NULL AS OS_BAL_AMT_MOR,
+        NULL AS FRCLSR_F_MOR,
+        NULL AS PD_OFF_F_MOR,
+        NULL AS FUND_CD_MOR,
+        NULL AS MTH_IN_ARRS_CNT_MOR,
+        NULL AS LIFE_INSUR_CD_MOR,
+        f.TRNST_NUM              AS TRNST_NUM_REV,
+        f.SRC_CD                 AS SOURCE_CD,
+        f.BLOCK_RECL_CD,
+        f.ACCT_STAT_CD,
+        TRY_CAST(f.CR_LMT_AMT AS DECIMAL(17, 3))     AS CR_LMT_AMT,
+        TRY_CAST(f.TOT_NEW_BAL_AMT AS DECIMAL(17, 3)) AS TOT_NEW_BAL_AMT,
+        f.NON_ACCRL_DT,
+        f.WRITE_OFF_DT,
+        f.ACCT_CLS_RSN_CD,
+        f.PRD_CD                 AS PRD_CD_REV,
+        i.LAST_NEW_DFT_DT        AS DFT_DT_REV,
+        i.LAST_NEW_DFT_BAL_AMT   AS DFT_BAL_REV,
+        i.MODEL_DFT_F            AS MODEL_DFT_F_REV,
+        NULL AS DFT_DT_SPL,
+        NULL AS DFT_BAL_SPL,
+        NULL AS MODEL_DFT_F_SPL,
+        NULL AS DEFAULT_DATE_MOR,
+        NULL AS DEFAULT_BAL_MOR,
+        NULL AS DEFAULT_IND_MOR,
+        CASE WHEN SUBSTR(f.BLOCK_RECL_CD, 1, 1) = 'V' THEN 1 ELSE 0 END AS blocked,
+        CASE WHEN f.BLOCK_RECL_CD = 'B4' THEN 1 ELSE 0 END AS deceased,
+        CASE WHEN SUBSTR(f.BLOCK_RECL_CD, 1, 1) IN ('S', ' S') THEN 1 ELSE 0 END AS stolen,
+        CASE WHEN a.product IN ('LOC','MOR','SCL','SPL','SSL','VAX','VCL','VFA','VFF','VGD','VIC','VLR','VUS','VZX','VZZ')
+             THEN 1 ELSE 0 END AS lend_prods
+    FROM emulated.CIS_DATA_NEW2 a
+    LEFT JOIN ingestion.TM_DIM a1
+        ON a.file_date = a1.TM_LVL_ST_DT
+       AND TRIM(a1.TM_LVL) = 'Month'
+       AND a.FILE_YR_MTH = RIGHT('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}', 4)
+    -- SAS ..._DEC :176. INNER JOIN restricts branch 2 to the TSYS end-of-chain accounts,
+    -- matched on a.account = b2.TSYS_ACCT_ID.
+    INNER JOIN (
+        SELECT TSYS_ACCT_ID, BCM_ACCT_NUM
+        FROM ingestion.KQ_TKQ_KS_TSYS_XREF
+        WHERE END_OF_CHAIN_INDICATOR = 'Y' AND TSYS_CUST_TYPE_CD = '0'
+    ) b2 ON LPAD(a.account, 23, '0') = LPAD(b2.TSYS_ACCT_ID, 23, '0')
+    -- SAS :177. basel_acct_id is re-keyed via BCM_ACCT_NUM (NOT a.account).
+    LEFT JOIN ingestion.BASEL_ACCT_DIM b
+        ON LPAD(b2.BCM_ACCT_NUM, 23, '0') = b.ACCT_NUM
+    LEFT JOIN emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS c
+        ON b.BASEL_ACCT_ID = c.BASEL_ACCT_ID
+       AND a1.TM_ID = c.MTH_TM_ID
+       AND c.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+       AND c.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
+    LEFT JOIN ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT f
+        ON b.BASEL_ACCT_ID = f.BASEL_ACCT_ID
+       AND a1.TM_ID = f.MTH_TM_ID
+       AND f.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+    LEFT JOIN emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR i
+        ON b.BASEL_ACCT_ID = i.BASEL_ACCT_ID
+       AND a1.TM_ID = i.OBSVTN_MTH_TM_ID
+       AND i.OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
+       AND i.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
     WHERE a.FILE_YR_MTH = RIGHT('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}', 4)
       AND COALESCE(a.RELATION_CODE, '') <> 'POA'
       AND COALESCE(a.PRODUCT, '') <> 'SEA'
