@@ -193,7 +193,7 @@ def export_gather(
       AND COALESCE(a.RELATION_CODE, '') <> 'POA'
       AND COALESCE(a.PRODUCT, '') <> 'SEA'
       AND COALESCE(f.PRD_CD, '') NOT IN ('VFB', 'BLV')
-      AND LPAD(a.account, 23, '0') NOT IN (SELECT acct_key FROM tsys_excl)
+      AND LPAD(a.account, 23, '0') NOT IN (SELECT acct_key FROM tsys_excl WHERE acct_key IS NOT NULL)
 
     UNION
 
