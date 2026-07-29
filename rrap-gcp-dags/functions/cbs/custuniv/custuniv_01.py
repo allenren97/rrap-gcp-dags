@@ -57,15 +57,17 @@ def export_gather(
     resource_tier="HIGH",
     pool_slots=96,
     sql=f"""
-    WITH tsys_excl AS (
-        -- SAS J_CBS_0010_CUSTUNIV_01_DEC (:80-83): TSYS end-of-chain accounts
-        -- (TSYS_CUST_TYPE_CD='0'). Excluded from branch 1 and handled REV-only in branch 2.
-        -- Keyed by BOTH the TSYS and BCM account numbers, LPAD'd to 23.
-        SELECT LPAD(TSYS_ACCT_ID, 23, '0') AS acct_key
-        FROM ingestion.KQ_TKQ_KS_TSYS_XREF
-        WHERE END_OF_CHAIN_INDICATOR = 'Y' AND TSYS_CUST_TYPE_CD = '0'
-        UNION
-        SELECT LPAD(BCM_ACCT_NUM, 23, '0')
+    WITH xref_eoc AS MATERIALIZED (
+        -- SAS ..._DEC (:80-83, :176): TSYS end-of-chain accounts (TSYS_CUST_TYPE_CD='0').
+        -- The raw xref is ~14M rows, so filter + LPAD + DISTINCT it ONCE (MATERIALIZED) and
+        -- reuse it for BOTH the branch-1 exclusion and the branch-2 join -- that avoids
+        -- scanning the 14M-row xref three times and the big UNION dedup (the OOM). DISTINCT
+        -- also collapses per-account duplicates (e.g. multiple businesseffectivedates); if
+        -- the (tsys,bcm) mapping is NOT stable across dates, add a
+        -- `WHERE businesseffectivedate = <snapshot>` filter here.
+        SELECT DISTINCT
+            LPAD(TSYS_ACCT_ID, 23, '0') AS tsys_key,
+            LPAD(BCM_ACCT_NUM, 23, '0') AS bcm_key
         FROM ingestion.KQ_TKQ_KS_TSYS_XREF
         WHERE END_OF_CHAIN_INDICATOR = 'Y' AND TSYS_CUST_TYPE_CD = '0'
     )
@@ -193,7 +195,8 @@ def export_gather(
       AND COALESCE(a.RELATION_CODE, '') <> 'POA'
       AND COALESCE(a.PRODUCT, '') <> 'SEA'
       AND COALESCE(f.PRD_CD, '') NOT IN ('VFB', 'BLV')
-      AND LPAD(a.account, 23, '0') NOT IN (SELECT acct_key FROM tsys_excl WHERE acct_key IS NOT NULL)
+      AND LPAD(a.account, 23, '0') NOT IN (SELECT tsys_key FROM xref_eoc WHERE tsys_key IS NOT NULL)
+      AND LPAD(a.account, 23, '0') NOT IN (SELECT bcm_key FROM xref_eoc WHERE bcm_key IS NOT NULL)
 
     UNION
 
@@ -263,14 +266,10 @@ def export_gather(
        AND a.FILE_YR_MTH = RIGHT('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}', 4)
     -- SAS ..._DEC :176. INNER JOIN restricts branch 2 to the TSYS end-of-chain accounts,
     -- matched on a.account = b2.TSYS_ACCT_ID.
-    INNER JOIN (
-        SELECT TSYS_ACCT_ID, BCM_ACCT_NUM
-        FROM ingestion.KQ_TKQ_KS_TSYS_XREF
-        WHERE END_OF_CHAIN_INDICATOR = 'Y' AND TSYS_CUST_TYPE_CD = '0'
-    ) b2 ON LPAD(a.account, 23, '0') = LPAD(b2.TSYS_ACCT_ID, 23, '0')
+    INNER JOIN xref_eoc b2 ON LPAD(a.account, 23, '0') = b2.tsys_key
     -- SAS :177. basel_acct_id is re-keyed via BCM_ACCT_NUM (NOT a.account).
     LEFT JOIN ingestion.BASEL_ACCT_DIM b
-        ON LPAD(b2.BCM_ACCT_NUM, 23, '0') = b.ACCT_NUM
+        ON b2.bcm_key = b.ACCT_NUM
     LEFT JOIN emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS c
         ON b.BASEL_ACCT_ID = c.BASEL_ACCT_ID
        AND a1.TM_ID = c.MTH_TM_ID
