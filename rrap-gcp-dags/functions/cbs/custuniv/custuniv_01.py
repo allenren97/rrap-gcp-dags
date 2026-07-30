@@ -20,8 +20,10 @@ DOWNSTREAM_ASSET = "cbs.CIS_DATA_POP_02"
 
 _TASK_GROUP = "custuniv__custuniv_01"
 
+_N_BATCHES = 8
+
 DEPENDENCIES = {
-    "export_gather": ["export_result"],
+    **{f"export_gather_{_i:02d}": ["export_result"] for _i in range(_N_BATCHES)},
     "export_result": ["duckdb_load"],
     "duckdb_delete": ["duckdb_load"],
 }
@@ -50,11 +52,8 @@ def duckdb_delete(
     pass
 
 
-def export_gather(
-    duckdb_conn_id="duckdb-conn",
-    resource_tier="HIGH",
-    pool_slots=96,
-    sql=f"""
+def _gather_sql(k, n):
+    return f"""
     WITH xref_eoc AS MATERIALIZED (
         SELECT DISTINCT
             LPAD(TSYS_ACCT_ID, 23, '0') AS tsys_key,
@@ -74,9 +73,9 @@ def export_gather(
         d.PRD_ID                 AS PRD_ID_SPL,
         d.MODEL_EXCL_F           AS SCORECRD_EXCLSN_F_SPL,
         d.COMM_F_V2              AS COMM_FLG_SPL,
-        TRY_CAST(d.OS_BAL_AMT_V2 AS DECIMAL(17, 3)) AS OS_BAL_AMT_SPL, 
+        TRY_CAST(d.OS_BAL_AMT_V2 AS DECIMAL(17, 3)) AS OS_BAL_AMT_SPL,
         d.TREATMNT_F             AS PRD_TREATMNT_CD_SPL,
-        g.RECD_STAT_CD           AS RECD_STAT_CD_SPL,  -- prod DDL: VARCHAR (not compared numerically)
+        g.RECD_STAT_CD           AS RECD_STAT_CD_SPL,
         TRY_CAST(f.BNS_DLQNT_DAY AS INTEGER)        AS BNS_DLQNT_DAY_REV,
         TRY_CAST(g.DAY_ODUE AS INTEGER)             AS DAY_ODUE_SPL,
         TRY_CAST(e.DLQNT_DAY_CNT AS INTEGER)        AS DLQNT_DAY_CNT_MOR,
@@ -123,7 +122,11 @@ def export_gather(
         ON a.file_date = a1.TM_LVL_ST_DT
        AND TRIM(a1.TM_LVL) = 'Month'
        AND a.FILE_YR_MTH = RIGHT('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}', 4)
-    LEFT JOIN ingestion.BASEL_ACCT_DIM_MAY_2026 b
+    LEFT JOIN (
+        SELECT ACCT_NUM, BASEL_ACCT_ID
+        FROM ingestion.BASEL_ACCT_DIM_MAY_2026
+        WHERE hash(ACCT_NUM) % {n} = {k}
+    ) b
         ON LPAD(a.account, 23, '0') = b.ACCT_NUM
     LEFT JOIN emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS c
         ON b.BASEL_ACCT_ID = c.BASEL_ACCT_ID
@@ -178,6 +181,7 @@ def export_gather(
       AND COALESCE(f.PRD_CD, '') NOT IN ('VFB', 'BLV')
       AND LPAD(a.account, 23, '0') NOT IN (SELECT tsys_key FROM xref_eoc WHERE tsys_key IS NOT NULL)
       AND LPAD(a.account, 23, '0') NOT IN (SELECT bcm_key FROM xref_eoc WHERE bcm_key IS NOT NULL)
+      AND hash(LPAD(a.account, 23, '0')) % {n} = {k}
 
     UNION
 
@@ -266,9 +270,34 @@ def export_gather(
       AND COALESCE(a.RELATION_CODE, '') <> 'POA'
       AND COALESCE(a.PRODUCT, '') <> 'SEA'
       AND COALESCE(f.PRD_CD, '') NOT IN ('VFB', 'BLV')
-    """,
-):
-    pass
+      AND hash(LPAD(a.account, 23, '0')) % {n} = {k}
+    """
+
+
+def _make_gather(sql_text):
+    def export_gather(
+        duckdb_conn_id="duckdb-conn",
+        resource_tier="HIGH",
+        pool_slots=96,
+        sql=sql_text,
+    ):
+        pass
+    return export_gather
+
+
+for _i in range(_N_BATCHES):
+    globals()[f"export_gather_{_i:02d}"] = _make_gather(_gather_sql(_i, _N_BATCHES))
+
+del _make_gather, _gather_sql, _i
+
+
+_GATHER_PARQUETS = ",\n                ".join(
+    '\'{{ task_instance.xcom_pull(task_ids="'
+    + _TASK_GROUP + '.export_gather_' + f"{k:02d}"
+    + '", key="parquet") }}\''
+    for k in range(_N_BATCHES)
+)
+
 
 def export_result(
     duckdb_conn_id="duckdb-conn",
@@ -278,9 +307,9 @@ def export_result(
     WITH
         g AS (
             SELECT *
-            FROM read_parquet(
-                '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_gather", key="parquet") }}}}'
-            )
+            FROM read_parquet([
+                {_GATHER_PARQUETS}
+            ])
         ),
         d1 AS (
             SELECT
