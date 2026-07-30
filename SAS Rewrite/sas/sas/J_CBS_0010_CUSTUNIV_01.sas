@@ -57,24 +57,32 @@ proc sql;
 			when ( SUBSTR(f.BLOCK_RECL_CD,1,1)='V' ) then 1 
 			else 0 
 		end 
-	as blocked,
+		as blocked,
 		case 
 			when ( f.BLOCK_RECL_CD='B4' ) then 1 
 			else 0 
 		end 
-	as deceased,
+		as deceased,
 		case 
 			when ( SUBSTR(f.BLOCK_RECL_CD,1,1)='S' or SUBSTR(f.BLOCK_RECL_CD,1,1)=' S') then 1 
 			else 0 
 		end 
-	as stolen,
+		as stolen,
 		case 
 			when a.product in ('LOC','MOR','SCL','SPL','SSL','VAX','VCL','VFA','VFF','VGD','VIC','VLR','VUS','VZX','VZZ') then 1 
 			else 0 
 		end 
-	as lend_prods
+		as lend_prods
 		from 
-			credit_risk.CIS_DATA_NEW2 as a
+			(select * from credit_risk.CIS_DATA_NEW2 where file_yr_mth in (&dt.) and RELATION_CODE <>'POA' and isnull(PRODUCT,'') not in ('SEA') and  lpad(account,23,0) in 
+				(
+				select lpad(account,23,0)  from credit_risk.CIS_DATA_NEW2 where file_yr_mth in (&dt.) and RELATION_CODE <>'POA' and isnull(PRODUCT,'') not in ('SEA')
+				except 
+					(select  lpad(b1.TSYS_ACCT_ID,23,0) from &RRAP_DB..kq_tkq_ks_tsys_xref as b1 where b1.END_OF_CHAIN_INDICATOR='Y' AND b1.TSYS_CUST_TYPE_CD='0' 
+					union 
+					select  lpad(b2.BCM_ACCT_NUM,23,0) from &RRAP_DB..kq_tkq_ks_tsys_xref as b2 where b2.END_OF_CHAIN_INDICATOR='Y' AND b2.TSYS_CUST_TYPE_CD='0')
+				)
+			) as a 
 		left join &RRAP_DB..TM_DIM as a1 on a.file_date=a1.TM_LVL_ST_DT and a1.TM_LVL='Month' and a.file_yr_mth in (&dt.)
 		left join &RRAP_DB..BASEL_ACCT_DIM as b on lpad(a.account,23,0)=b.acct_num
 		left join &RRAP_DB..BASEL_REVLVNG_CR_BASE_DRVD_VARS as c on b.basel_acct_id=c.basel_acct_id and a1.tm_id=c.mth_tm_id and c.mth_tm_id=&tm_id.
@@ -87,8 +95,92 @@ proc sql;
 		left join &RRAP_DB..PSNL_LOAN_OBSVTN_PT_DRVD_VAR as j on b.basel_acct_id=j.basel_acct_id and a1.tm_id=j.OBSVTN_MTH_TM_ID and j.OBSVTN_MTH_TM_ID=&tm_id.
 		left join &FRG_DB..STATUS_FINAL as k on to_number(h.MORT_NUM,'9999999')=k.MORTGAGE_NO and a1.TM_LVL_END_DT=date_trunc('day',k.process_date) and date_trunc('day',k.process_date)=&string.
 		left join &FRG_DB..TWELVE_MON_DEF_WINDOW as l on to_number(h.MORT_NUM,'9999999')=l.MORTGAGE_NO and a1.TM_LVL_END_DT=l.process_date and l.process_date=&string.
-			where a.file_yr_mth in (&dt.) and a.RELATION_CODE <>'POA' and isnull(a.PRODUCT,'') not in ('SEA') and isnull(f.PRD_CD,'') not in ('VFB','BLV')
-	) WITH DATA
+		where a.file_yr_mth in (&dt.) and a.RELATION_CODE <>'POA' and isnull(a.PRODUCT,'') not in ('SEA') and isnull(f.PRD_CD,'') not in ('VFB','BLV')
+		
+		union
+		
+		select
+			a.*,
+			a1.tm_id as mth_tm_id,
+			a1.TM_LVL_END_DT as process_date,
+			b.basel_acct_id,
+			c.PIT_STAT_VER_2_CD as PIT_STAT_REV,
+			c.CONSM_PRD_TREATMNT_CD as PRD_TREATMNT_CD_REV,
+			c.CONSM_SCORECRD_EXCLSN_F as SCORECRD_EXCLSN_F_REV,
+			NULL as PIT_STAT_SPL,
+			NULL as PRD_ID_SPL,
+			NULL as SCORECRD_EXCLSN_F_SPL,
+			NULL as COMM_FLG_SPL,
+			NULL as OS_BAL_AMT_SPL,
+			NULL as PRD_TREATMNT_CD_SPL,
+			NULL as RECD_STAT_CD_SPL,
+			f.BNS_DLQNT_DAY as BNS_DLQNT_DAY_REV,
+			NULL as DAY_ODUE_SPL,
+			NULL as DLQNT_DAY_CNT_MOR,
+			NULL as PIT_STAT_MOR,
+			NULL as SCORECRD_EXCLSN_F_MOR,
+			NULL as LRA_STATUS_MOR,
+			NULL as PAID_OFF_DATE_MOR,
+			NULL as CURRENT_BAL_MOR,
+			NULL as TOTAL_SUSPENSE_MOR,
+			NULL as PRD_TREATMNT_CD_MOR,
+			NULL as COMM_TP_CD_MOR,
+			NULL as OS_BAL_AMT_MOR,
+			NULL as FRCLSR_F_MOR,
+			NULL as PD_OFF_F_MOR,
+			NULL as FUND_CD_MOR,
+			NULL as MTH_IN_ARRS_CNT_MOR,
+			NULL as LIFE_INSUR_CD_MOR,
+			f.TRNST_NUM as TRNST_NUM_REV,
+			f.SRC_CD as SOURCE_CD,
+			f.BLOCK_RECL_CD,
+			f.ACCT_STAT_CD,
+			f.CR_LMT_AMT,
+			f.TOT_NEW_BAL_AMT,
+			f.NON_ACCRL_DT,
+			f.WRITE_OFF_DT,
+			f.ACCT_CLS_RSN_CD,
+			f.PRD_CD as PRD_CD_REV,
+			i.LAST_NEW_DFT_DT as DFT_DT_REV,
+			i.LAST_NEW_DFT_BAL_AMT DFT_BAL_REV,
+			i.MODEL_DFT_F as MODEL_DFT_F_REV,
+			NULL as DFT_DT_SPL,
+			NULL as DFT_BAL_SPL,
+			NULL as MODEL_DFT_F_SPL,
+			NULL as DEFAULT_DATE_MOR,
+			NULL as DEFAULT_BAL_MOR,
+			NULL AS DEFAULT_IND_MOR,
+		case 
+			when ( SUBSTR(f.BLOCK_RECL_CD,1,1)='V' ) then 1 
+			else 0 
+		end 
+		as blocked,
+		case 
+			when ( f.BLOCK_RECL_CD='B4' ) then 1 
+			else 0 
+		end 
+		as deceased,
+		case 
+			when ( SUBSTR(f.BLOCK_RECL_CD,1,1)='S' or SUBSTR(f.BLOCK_RECL_CD,1,1)=' S') then 1 
+			else 0 
+		end 
+		as stolen,
+		case 
+			when a.product in ('LOC','MOR','SCL','SPL','SSL','VAX','VCL','VFA','VFF','VGD','VIC','VLR','VUS','VZX','VZZ') then 1 
+			else 0 
+		end 
+		as lend_prods
+		from 
+			credit_risk.CIS_DATA_NEW2 as a 
+		left join &RRAP_DB..TM_DIM as a1 on a.file_date=a1.TM_LVL_ST_DT and a1.TM_LVL='Month' and a.file_yr_mth in (&dt.)
+		inner join ( select  TSYS_ACCT_ID,BCM_ACCT_NUM from  &RRAP_DB..kq_tkq_ks_tsys_xref where END_OF_CHAIN_INDICATOR= 'Y' and TSYS_CUST_TYPE_CD='0' )  as b2 on lpad(a.account,23,0)= lpad(b2.TSYS_ACCT_ID,23,0)
+		left join &RRAP_DB..BASEL_ACCT_DIM as b on lpad(b2.BCM_ACCT_NUM,23,0)=b.acct_num
+		left join &RRAP_DB..BASEL_REVLVNG_CR_BASE_DRVD_VARS as c on b.basel_acct_id=c.basel_acct_id and a1.tm_id=c.mth_tm_id and c.mth_tm_id=&tm_id.
+		left join &RRAP_DB..BASEL_REVLVNG_CR_MTH_SNAPSHOT as f on b.basel_acct_id=f.basel_acct_id and a1.tm_id=f.mth_tm_id and f.mth_tm_id=&tm_id.
+		left join &RRAP_DB..REVLVNG_CR_OBSVTN_PT_DRVD_VAR as i on b.basel_acct_id=i.basel_acct_id and a1.tm_id=i.OBSVTN_MTH_TM_ID and i.OBSVTN_MTH_TM_ID=&tm_id.
+		where a.file_yr_mth in (&dt.) and a.RELATION_CODE <>'POA' and isnull(a.PRODUCT,'') not in ('SEA') and isnull(f.PRD_CD,'') not in ('VFB','BLV') 
+	
+		) WITH DATA
 				) by nzcon;
 	disconnect from nzcon;
 quit;

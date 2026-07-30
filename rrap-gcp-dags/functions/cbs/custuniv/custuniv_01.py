@@ -2,8 +2,8 @@
 UPSTREAM_ASSET = [
     "emulated.CIS_DATA_NEW2",
     "ingestion.TM_DIM",
-    "ingestion.BASEL_ACCT_DIM",
-    "ingestion.KQ_TKQ_KS_TSYS_XREF",
+    "ingestion.BASEL_ACCT_DIM_MAY_2026",
+    "reference.KQ_TKQ_KS_TSYS_XREF",
     "ingestion.BASEL_REVLVNG_CR_MTH_SNAPSHOT",
     "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
     "ingestion.BASEL_MORT_MTH_SNAPSHOT",
@@ -26,8 +26,6 @@ DEPENDENCIES = {
     "duckdb_delete": ["duckdb_load"],
 }
 
-# Columns produced only as per-source intermediates in the gather; dropped from the
-# final output (mirrors the DROP= list on the SAS CIS_DATA_POP_02 data step).
 _DROP_COLS = """
     PIT_STAT_REV, PIT_STAT_SPL, PIT_STAT_MOR,
     PRD_TREATMNT_CD_REV, PRD_TREATMNT_CD_SPL, PRD_TREATMNT_CD_MOR,
@@ -58,21 +56,12 @@ def export_gather(
     pool_slots=96,
     sql=f"""
     WITH xref_eoc AS MATERIALIZED (
-        -- SAS ..._DEC (:80-83, :176): TSYS end-of-chain accounts (TSYS_CUST_TYPE_CD='0').
-        -- The raw xref is ~14M rows, so filter + LPAD + DISTINCT it ONCE (MATERIALIZED) and
-        -- reuse it for BOTH the branch-1 exclusion and the branch-2 join -- that avoids
-        -- scanning the 14M-row xref three times and the big UNION dedup (the OOM). DISTINCT
-        -- also collapses per-account duplicates (e.g. multiple businesseffectivedates); if
-        -- the (tsys,bcm) mapping is NOT stable across dates, add a
-        -- `WHERE businesseffectivedate = <snapshot>` filter here.
         SELECT DISTINCT
             LPAD(TSYS_ACCT_ID, 23, '0') AS tsys_key,
             LPAD(BCM_ACCT_NUM, 23, '0') AS bcm_key
-        FROM ingestion.KQ_TKQ_KS_TSYS_XREF
+        FROM reference.KQ_TKQ_KS_TSYS_XREF
         WHERE END_OF_CHAIN_INDICATOR = 'Y' AND TSYS_CUST_TYPE_CD = '0'
     )
-    -- Branch 1 (SAS ..._DEC :5-98): CIS accounts EXCLUDING the TSYS end-of-chain set --
-    -- full multi-product join.
     SELECT
         a.*,
         a1.TM_ID AS mth_tm_id,
@@ -85,7 +74,7 @@ def export_gather(
         d.PRD_ID                 AS PRD_ID_SPL,
         d.MODEL_EXCL_F           AS SCORECRD_EXCLSN_F_SPL,
         d.COMM_F_V2              AS COMM_FLG_SPL,
-        NULLIF(TRY_CAST(d.OS_BAL_AMT_V2 AS DECIMAL(17, 3)), 0) AS OS_BAL_AMT_SPL,  -- 0 -> NULL (prod stores NULL, not 0)
+        TRY_CAST(d.OS_BAL_AMT_V2 AS DECIMAL(17, 3)) AS OS_BAL_AMT_SPL, 
         d.TREATMNT_F             AS PRD_TREATMNT_CD_SPL,
         g.RECD_STAT_CD           AS RECD_STAT_CD_SPL,  -- prod DDL: VARCHAR (not compared numerically)
         TRY_CAST(f.BNS_DLQNT_DAY AS INTEGER)        AS BNS_DLQNT_DAY_REV,
@@ -130,17 +119,12 @@ def export_gather(
         CASE WHEN a.product IN ('LOC','MOR','SCL','SPL','SSL','VAX','VCL','VFA','VFF','VGD','VIC','VLR','VUS','VZX','VZZ')
              THEN 1 ELSE 0 END AS lend_prods
     FROM emulated.CIS_DATA_NEW2 a
-    -- SAS :78. a1 = TM_DIM month whose start = file_date. file_yr_mth IN (&dt), where
-    -- &dt = put(mth_end_dt, yymmn4.) = the reporting month in YYMM form (e.g. '2605';
-    -- FILE_YR_MTH is VARCHAR(4) in prod). RIGHT(yyyymm,4) = '202605' -> '2605'.
     LEFT JOIN ingestion.TM_DIM a1
         ON a.file_date = a1.TM_LVL_ST_DT
        AND TRIM(a1.TM_LVL) = 'Month'
        AND a.FILE_YR_MTH = RIGHT('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}', 4)
-    -- SAS :79
-    LEFT JOIN ingestion.BASEL_ACCT_DIM b
+    LEFT JOIN ingestion.BASEL_ACCT_DIM_MAY_2026 b
         ON LPAD(a.account, 23, '0') = b.ACCT_NUM
-    -- SAS :80-85. Redundant a1.TM_ID = X.MTH_TM_ID kept alongside X.MTH_TM_ID = &tm_id.
     LEFT JOIN emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS c
         ON b.BASEL_ACCT_ID = c.BASEL_ACCT_ID
        AND a1.TM_ID = c.MTH_TM_ID
@@ -168,7 +152,6 @@ def export_gather(
         ON b.BASEL_ACCT_ID = h.BASEL_ACCT_ID
        AND a1.TM_ID = h.MTH_TM_ID
        AND h.MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
-    -- SAS :86-87. Redundant a1.TM_ID = X.OBSVTN_MTH_TM_ID kept alongside = &tm_id.
     LEFT JOIN emulated.REVLVNG_CR_OBSVTN_PT_DRVD_VAR i
         ON b.BASEL_ACCT_ID = i.BASEL_ACCT_ID
        AND a1.TM_ID = i.OBSVTN_MTH_TM_ID
@@ -179,7 +162,6 @@ def export_gather(
        AND a1.TM_ID = j.OBSVTN_MTH_TM_ID
        AND j.OBSVTN_MTH_TM_ID = {{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}}}
        AND j.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
-    -- SAS :88-89. to_number(MORT_NUM,'9999999') -> TRY_CAST(... AS BIGINT).
     LEFT JOIN emulated.STATUS_FINAL k
         ON TRY_CAST(h.MORT_NUM AS BIGINT) = k.MORTGAGE_NO
        AND a1.TM_LVL_END_DT = CAST(k.PROCESS_DATE AS DATE)
@@ -190,7 +172,6 @@ def export_gather(
        AND a1.TM_LVL_END_DT = l.PROCESS_DATE
        AND l.PROCESS_DATE = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
        AND l.STREAM = '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}'
-    -- SAS :90 + branch-1 restriction: exclude the TSYS end-of-chain accounts (they go to branch 2).
     WHERE a.FILE_YR_MTH = RIGHT('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}', 4)
       AND COALESCE(a.RELATION_CODE, '') <> 'POA'
       AND COALESCE(a.PRODUCT, '') <> 'SEA'
@@ -200,9 +181,6 @@ def export_gather(
 
     UNION
 
-    -- Branch 2 (SAS ..._DEC :102-181): the excluded TSYS end-of-chain accounts, re-keyed to
-    -- BASEL_ACCT_DIM via BCM_ACCT_NUM (not a.account) and joined REV-only (c/f/i). Every
-    -- SPL and MOR column is NULL to line up with branch 1's column list for the UNION.
     SELECT
         a.*,
         a1.TM_ID AS mth_tm_id,
@@ -264,12 +242,12 @@ def export_gather(
         ON a.file_date = a1.TM_LVL_ST_DT
        AND TRIM(a1.TM_LVL) = 'Month'
        AND a.FILE_YR_MTH = RIGHT('{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm") }}}}', 4)
-    -- SAS ..._DEC :176. INNER JOIN restricts branch 2 to the TSYS end-of-chain accounts,
-    -- matched on a.account = b2.TSYS_ACCT_ID.
     INNER JOIN xref_eoc b2 ON LPAD(a.account, 23, '0') = b2.tsys_key
-    -- SAS :177. basel_acct_id is re-keyed via BCM_ACCT_NUM (NOT a.account).
-    LEFT JOIN ingestion.BASEL_ACCT_DIM b
-        ON b2.bcm_key = b.ACCT_NUM
+    LEFT JOIN (
+        SELECT ACCT_NUM, BASEL_ACCT_ID
+        FROM ingestion.BASEL_ACCT_DIM_MAY_2026
+        WHERE ACCT_NUM IN (SELECT bcm_key FROM xref_eoc)
+    ) b ON b2.bcm_key = b.ACCT_NUM
     LEFT JOIN emulated.BASEL_REVLVNG_CR_BASE_DRVD_VARS c
         ON b.BASEL_ACCT_ID = c.BASEL_ACCT_ID
        AND a1.TM_ID = c.MTH_TM_ID
@@ -304,7 +282,6 @@ def export_result(
                 '{{{{ task_instance.xcom_pull(task_ids="{_TASK_GROUP}.export_gather", key="parquet") }}}}'
             )
         ),
-        -- Commercial-mortgage PIT_STAT override (SAS lines 131-146).
         d1 AS (
             SELECT
                 g.*,
@@ -408,8 +385,6 @@ def export_result(
                 CASE WHEN lend_bucket = 'DEF' THEN 1 ELSE 0 END AS lend_prods_DEF,
                 CASE WHEN lend_bucket = 'CHG' THEN 1 ELSE 0 END AS lend_prods_CHG,
                 CASE WHEN lend_bucket = 'WO'  THEN 1 ELSE 0 END AS lend_prods_WO,
-                -- SAS inits lend_prods_COMM=0 and never sets it (custuniv_01.sas:123); kept
-                -- for schema parity with prod CIS_DATA_POP_02 (col 59).
                 0 AS lend_prods_COMM,
                 CASE WHEN lend_bucket = 'COMM_CUR' THEN 1 ELSE 0 END AS lend_prods_COMM_CUR,
                 CASE WHEN lend_bucket = 'COMM_CLO' THEN 1 ELSE 0 END AS lend_prods_COMM_CLO,
@@ -449,7 +424,6 @@ def export_result(
                     WHEN SOURCE_CD = '911' AND rev_ind = 1 AND (lend_prods_CUR = 1 OR lend_prods_CLO = 1) THEN 'Y'
                     ELSE 'N'
                 END AS STAFF_EXCL,
-                -- MODEL_EXCL: consolidated exclusion, with SSL/VUS-without-block override.
                 CASE
                     WHEN product IN ('SSL','VUS') AND COALESCE(BLOCK_RECL_CD, '') = '' THEN 'N'
                     ELSE COALESCE(NULLIF(SCORECRD_EXCLSN_F_REV, ''), NULLIF(SCORECRD_EXCLSN_F_SPL, ''), NULLIF(SCORECRD_EXCLSN_F_MOR, ''))
