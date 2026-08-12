@@ -174,27 +174,43 @@ RENDER_SQL = """
                 CASE WHEN _status2 = 'CUR' AND _status3 = 'DEF' THEN _process_date3 END,
                 CASE WHEN _status1 = 'CUR' AND _status2 = 'DEF' THEN _process_date2 END
             ) AS default_date,
-                COALESCE(
-                CASE WHEN _status12 = 'CUR' AND _status13 = 'DEF' THEN _current_bal13 END,
-                CASE WHEN _status11 = 'CUR' AND _status12 = 'DEF' THEN _current_bal12 END,
-                CASE WHEN _status10 = 'CUR' AND _status11 = 'DEF' THEN _current_bal11 END,
-                CASE WHEN _status9 = 'CUR' AND _status10 = 'DEF' THEN _current_bal10 END,
-                CASE WHEN _status8 = 'CUR' AND _status9 = 'DEF' THEN _current_bal9 END,
-                CASE WHEN _status7 = 'CUR' AND _status8 = 'DEF' THEN _current_bal8 END,
-                CASE WHEN _status6 = 'CUR' AND _status7 = 'DEF' THEN _current_bal7 END,
-                CASE WHEN _status5 = 'CUR' AND _status6 = 'DEF' THEN _current_bal6 END,
-                CASE WHEN _status4 = 'CUR' AND _status5 = 'DEF' THEN _current_bal5 END,
-                CASE WHEN _status3 = 'CUR' AND _status4 = 'DEF' THEN _current_bal4 END,
-                CASE WHEN _status2 = 'CUR' AND _status3 = 'DEF' THEN _current_bal3 END,
-                CASE WHEN _status1 = 'CUR' AND _status2 = 'DEF' THEN _current_bal2 END
-            ) AS default_bal
+                GREATEST(
+                CASE WHEN _status12 = 'CUR' AND _status13 = 'DEF' THEN 13 END,
+                CASE WHEN _status11 = 'CUR' AND _status12 = 'DEF' THEN 12 END,
+                CASE WHEN _status10 = 'CUR' AND _status11 = 'DEF' THEN 11 END,
+                CASE WHEN _status9 = 'CUR' AND _status10 = 'DEF' THEN 10 END,
+                CASE WHEN _status8 = 'CUR' AND _status9 = 'DEF' THEN 9 END,
+                CASE WHEN _status7 = 'CUR' AND _status8 = 'DEF' THEN 8 END,
+                CASE WHEN _status6 = 'CUR' AND _status7 = 'DEF' THEN 7 END,
+                CASE WHEN _status5 = 'CUR' AND _status6 = 'DEF' THEN 6 END,
+                CASE WHEN _status4 = 'CUR' AND _status5 = 'DEF' THEN 5 END,
+                CASE WHEN _status3 = 'CUR' AND _status4 = 'DEF' THEN 4 END,
+                CASE WHEN _status2 = 'CUR' AND _status3 = 'DEF' THEN 3 END,
+                CASE WHEN _status1 = 'CUR' AND _status2 = 'DEF' THEN 2 END
+            ) AS _match_slot
             FROM obs_window ow
         )
     SELECT
         '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' AS OBSN_DT,
         BASEL_ACCT_ID,
         obs_start_tm_id AS OBSVTN_MTH_TM_ID,
-        CASE WHEN _status1 = 'CUR' THEN COALESCE(default_bal, 0) END AS DEFAULT_BAL,
+        CASE WHEN _status1 = 'CUR' THEN
+            CASE _match_slot
+                WHEN 13 THEN _current_bal13
+                WHEN 12 THEN _current_bal12
+                WHEN 11 THEN _current_bal11
+                WHEN 10 THEN _current_bal10
+                WHEN 9 THEN _current_bal9
+                WHEN 8 THEN _current_bal8
+                WHEN 7 THEN _current_bal7
+                WHEN 6 THEN _current_bal6
+                WHEN 5 THEN _current_bal5
+                WHEN 4 THEN _current_bal4
+                WHEN 3 THEN _current_bal3
+                WHEN 2 THEN _current_bal2
+                ELSE 0
+            END
+        END AS DEFAULT_BAL,
         'MOR' AS SRC_SYS_CD
     FROM with_default
 """
