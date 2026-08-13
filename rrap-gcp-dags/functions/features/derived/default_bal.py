@@ -160,20 +160,6 @@ RENDER_SQL = """
         with_default AS (
             SELECT
                 ow.*,
-                COALESCE(
-                CASE WHEN _status12 = 'CUR' AND _status13 = 'DEF' THEN _process_date13 END,
-                CASE WHEN _status11 = 'CUR' AND _status12 = 'DEF' THEN _process_date12 END,
-                CASE WHEN _status10 = 'CUR' AND _status11 = 'DEF' THEN _process_date11 END,
-                CASE WHEN _status9 = 'CUR' AND _status10 = 'DEF' THEN _process_date10 END,
-                CASE WHEN _status8 = 'CUR' AND _status9 = 'DEF' THEN _process_date9 END,
-                CASE WHEN _status7 = 'CUR' AND _status8 = 'DEF' THEN _process_date8 END,
-                CASE WHEN _status6 = 'CUR' AND _status7 = 'DEF' THEN _process_date7 END,
-                CASE WHEN _status5 = 'CUR' AND _status6 = 'DEF' THEN _process_date6 END,
-                CASE WHEN _status4 = 'CUR' AND _status5 = 'DEF' THEN _process_date5 END,
-                CASE WHEN _status3 = 'CUR' AND _status4 = 'DEF' THEN _process_date4 END,
-                CASE WHEN _status2 = 'CUR' AND _status3 = 'DEF' THEN _process_date3 END,
-                CASE WHEN _status1 = 'CUR' AND _status2 = 'DEF' THEN _process_date2 END
-            ) AS default_date,
                 GREATEST(
                 CASE WHEN _status12 = 'CUR' AND _status13 = 'DEF' THEN 13 END,
                 CASE WHEN _status11 = 'CUR' AND _status12 = 'DEF' THEN 12 END,

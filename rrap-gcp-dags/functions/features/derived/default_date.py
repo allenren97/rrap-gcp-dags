@@ -173,21 +173,7 @@ RENDER_SQL = """
                 CASE WHEN _status3 = 'CUR' AND _status4 = 'DEF' THEN _process_date4 END,
                 CASE WHEN _status2 = 'CUR' AND _status3 = 'DEF' THEN _process_date3 END,
                 CASE WHEN _status1 = 'CUR' AND _status2 = 'DEF' THEN _process_date2 END
-            ) AS default_date,
-                COALESCE(
-                CASE WHEN _status12 = 'CUR' AND _status13 = 'DEF' THEN _current_bal13 END,
-                CASE WHEN _status11 = 'CUR' AND _status12 = 'DEF' THEN _current_bal12 END,
-                CASE WHEN _status10 = 'CUR' AND _status11 = 'DEF' THEN _current_bal11 END,
-                CASE WHEN _status9 = 'CUR' AND _status10 = 'DEF' THEN _current_bal10 END,
-                CASE WHEN _status8 = 'CUR' AND _status9 = 'DEF' THEN _current_bal9 END,
-                CASE WHEN _status7 = 'CUR' AND _status8 = 'DEF' THEN _current_bal8 END,
-                CASE WHEN _status6 = 'CUR' AND _status7 = 'DEF' THEN _current_bal7 END,
-                CASE WHEN _status5 = 'CUR' AND _status6 = 'DEF' THEN _current_bal6 END,
-                CASE WHEN _status4 = 'CUR' AND _status5 = 'DEF' THEN _current_bal5 END,
-                CASE WHEN _status3 = 'CUR' AND _status4 = 'DEF' THEN _current_bal4 END,
-                CASE WHEN _status2 = 'CUR' AND _status3 = 'DEF' THEN _current_bal3 END,
-                CASE WHEN _status1 = 'CUR' AND _status2 = 'DEF' THEN _current_bal2 END
-            ) AS default_bal
+            ) AS default_date
             FROM obs_window ow
         )
     SELECT
