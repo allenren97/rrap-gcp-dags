@@ -8,11 +8,12 @@ from bns.rrap.helpers.asset_event import (
 # MOR 12-month default-observation window (rewrite of RRAP_MOR_MODEL_02_BNS_MOR_PD_G.sas).
 # Scans STATUS (features.PIT_STATUS_CROSS_DEFAULT_ORIG, MOR) + balance (features.CURRENT_BAL, MOR)
 # over [rundate-38mo, rundate], builds 13-month forward windows per obs-start, detects the last
-# CUR->DEF transition. Batched by MOD(HASH(BASEL_ACCT_ID), 6) to bound peak memory
+# CUR->DEF transition, keyed by MORTGAGE_NO. Batched by MOD(HASH(MORT_NUM), 6) to bound peak memory
 # (the obs-window fan-out otherwise OOMs on the full MOR population).
 UPSTREAM_ASSET = [
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
     "features.CURRENT_BAL",
+    "features.MORT_NUM",
     "ingestion.TM_DIM",
 ]
 DOWNSTREAM_ASSET = "features.DEFAULT_DATE"
@@ -49,8 +50,8 @@ RENDER_SQL = """
                 LAST_DAY(DATE_TRUNC('month', p.end_period) + INTERVAL 12 MONTH) AS forward_end
             FROM params p
         ),
-        batch_accounts AS MATERIALIZED (
-            SELECT B.BASEL_ACCT_ID
+        batch_mortgages AS MATERIALIZED (
+            SELECT B.MORTGAGE_NO
             FROM '{{ task_instance.xcom_pull(task_ids="derived__default_date.export_account_buckets", key="parquet") }}' B
             CROSS JOIN params P
             WHERE B.BATCH_COUNT = P.batch_count
@@ -63,9 +64,19 @@ RENDER_SQL = """
                 ON TRIM(tm.TM_LVL) = 'Month'
                AND tm.TM_LVL_END_DT BETWEEN p.start_period AND p.end_period
         ),
+        acct_mortgage AS (
+            SELECT BASEL_ACCT_ID, OBSN_DT, TRY_CAST(MORT_NUM AS BIGINT) AS MORTGAGE_NO
+            FROM features.MORT_NUM
+            WHERE SRC_SYS_CD = 'MOR'
+              AND OBSN_DT BETWEEN (SELECT start_period FROM periods) AND (SELECT forward_end FROM periods)
+              AND TRY_CAST(MORT_NUM AS BIGINT) IS NOT NULL
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY MORT_NUM DESC NULLS LAST
+            ) = 1
+        ),
         status_hist AS (
             SELECT
-                pit.BASEL_ACCT_ID,
+                am.MORTGAGE_NO,
                 pit.PIT_STATUS_CROSS_DEFAULT_ORIG AS STATUS,
                 cb.CURRENT_BAL,
                 pit.OBSN_DT AS process_date,
@@ -73,7 +84,6 @@ RENDER_SQL = """
             FROM (
                 SELECT s.BASEL_ACCT_ID, s.OBSN_DT, s.PIT_STATUS_CROSS_DEFAULT_ORIG
                 FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG s
-                INNER JOIN batch_accounts ba ON s.BASEL_ACCT_ID = ba.BASEL_ACCT_ID
                 WHERE s.SRC_SYS_CD = 'MOR'
                   AND s.OBSN_DT BETWEEN (SELECT start_period FROM periods) AND (SELECT forward_end FROM periods)
                 QUALIFY ROW_NUMBER() OVER (
@@ -91,10 +101,17 @@ RENDER_SQL = """
                 ) = 1
             ) cb
                 ON cb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND cb.OBSN_DT = pit.OBSN_DT
+            INNER JOIN acct_mortgage am
+                ON am.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND am.OBSN_DT = pit.OBSN_DT
+            INNER JOIN batch_mortgages bm ON bm.MORTGAGE_NO = am.MORTGAGE_NO
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY am.MORTGAGE_NO, pit.OBSN_DT
+                ORDER BY pit.PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST, pit.BASEL_ACCT_ID
+            ) = 1
         ),
         windowed AS (
             SELECT
-                h.BASEL_ACCT_ID, h.STATUS, h.CURRENT_BAL, h.process_date,
+                h.MORTGAGE_NO, h.STATUS, h.CURRENT_BAL, h.process_date,
                 os.obs_start, os.obs_start_tm_id,
                 LAST_DAY(DATE_TRUNC('month', os.obs_start) + INTERVAL 12 MONTH) AS window_end_dt
             FROM status_hist h
@@ -104,12 +121,12 @@ RENDER_SQL = """
         ),
         ranked AS (
             SELECT w.*,
-                ROW_NUMBER() OVER (PARTITION BY w.BASEL_ACCT_ID, w.obs_start ORDER BY w.process_date) AS slot
+                ROW_NUMBER() OVER (PARTITION BY w.MORTGAGE_NO, w.obs_start ORDER BY w.process_date) AS slot
             FROM windowed w
         ),
         obs_window AS (
             SELECT
-                BASEL_ACCT_ID,
+                MORTGAGE_NO,
                 obs_start,
                 MAX(obs_start_tm_id) AS obs_start_tm_id,
                 MAX(window_end_dt) AS window_end_dt,
@@ -155,7 +172,7 @@ RENDER_SQL = """
                 MAX(CASE WHEN slot = 13 THEN CURRENT_BAL END) AS _current_bal13
             FROM ranked
             WHERE slot <= 13
-            GROUP BY BASEL_ACCT_ID, obs_start
+            GROUP BY MORTGAGE_NO, obs_start
         ),
         with_default AS (
             SELECT
@@ -178,7 +195,7 @@ RENDER_SQL = """
         )
     SELECT
         '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' AS OBSN_DT,
-        BASEL_ACCT_ID,
+        MORTGAGE_NO,
         obs_start_tm_id AS OBSVTN_MTH_TM_ID,
         CASE WHEN _status1 = 'CUR' THEN default_date END AS DEFAULT_DATE,
         'MOR' AS SRC_SYS_CD
@@ -196,12 +213,17 @@ def export_account_buckets(
     )
     SELECT DISTINCT
         6 AS BATCH_COUNT,
-        MOD(HASH(s.BASEL_ACCT_ID), 6) AS BATCH_ID,
-        s.BASEL_ACCT_ID
+        MOD(HASH(TRY_CAST(mn.MORT_NUM AS BIGINT)), 6) AS BATCH_ID,
+        TRY_CAST(mn.MORT_NUM AS BIGINT) AS MORTGAGE_NO
     FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG s
+    INNER JOIN features.MORT_NUM mn
+        ON mn.BASEL_ACCT_ID = s.BASEL_ACCT_ID
+       AND mn.OBSN_DT = s.OBSN_DT
+       AND mn.SRC_SYS_CD = 'MOR'
     CROSS JOIN periods p
     WHERE s.SRC_SYS_CD = 'MOR'
       AND s.OBSN_DT BETWEEN p.start_period AND p.end_period
+      AND TRY_CAST(mn.MORT_NUM AS BIGINT) IS NOT NULL
     """,
 ):
     pass

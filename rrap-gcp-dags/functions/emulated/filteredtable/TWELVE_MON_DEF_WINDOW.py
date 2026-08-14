@@ -14,7 +14,6 @@ UPSTREAM_ASSET = [
     "features.DEFAULT_IND",
     "features.DEFAULT_DATE",
     "features.DEFAULT_BAL",
-    "features.MORT_NUM",
     "ingestion.TM_DIM",
 ]
 
@@ -43,7 +42,7 @@ def duckdb_load(
     SELECT
         DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
-        TRY_CAST(mn.MORT_NUM AS BIGINT) AS MORTGAGE_NO,
+        ind.MORTGAGE_NO,
         obs.TM_LVL_END_DT AS PROCESS_DATE,
         dt.DEFAULT_DATE,
         bal.DEFAULT_BAL,
@@ -52,24 +51,17 @@ def duckdb_load(
         CURRENT_TIMESTAMP AS UPDT_PROCESS_TMSTMP
     FROM features.DEFAULT_IND ind
     INNER JOIN (
-        SELECT BASEL_ACCT_ID, MORT_NUM
-        FROM features.MORT_NUM
-        WHERE SRC_SYS_CD = 'MOR'
-          AND OBSN_DT = DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}'
-        QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY BASEL_ACCT_ID ORDER BY MORT_NUM DESC NULLS LAST
-        ) = 1
-    ) mn ON mn.BASEL_ACCT_ID = ind.BASEL_ACCT_ID
-    INNER JOIN ingestion.TM_DIM obs
-        ON obs.TM_ID = ind.OBSVTN_MTH_TM_ID
-       AND TRIM(obs.TM_LVL) = 'Month'
+        SELECT TM_ID, TM_LVL_END_DT FROM ingestion.TM_DIM
+        WHERE TRIM(TM_LVL) = 'Month'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY TM_ID ORDER BY TM_LVL_END_DT) = 1
+    ) obs ON obs.TM_ID = ind.OBSVTN_MTH_TM_ID
     LEFT JOIN features.DEFAULT_DATE dt
-        ON dt.BASEL_ACCT_ID = ind.BASEL_ACCT_ID
+        ON dt.MORTGAGE_NO = ind.MORTGAGE_NO
        AND dt.OBSVTN_MTH_TM_ID = ind.OBSVTN_MTH_TM_ID
        AND dt.OBSN_DT = ind.OBSN_DT
        AND dt.SRC_SYS_CD = ind.SRC_SYS_CD
     LEFT JOIN features.DEFAULT_BAL bal
-        ON bal.BASEL_ACCT_ID = ind.BASEL_ACCT_ID
+        ON bal.MORTGAGE_NO = ind.MORTGAGE_NO
        AND bal.OBSVTN_MTH_TM_ID = ind.OBSVTN_MTH_TM_ID
        AND bal.OBSN_DT = ind.OBSN_DT
        AND bal.SRC_SYS_CD = ind.SRC_SYS_CD
