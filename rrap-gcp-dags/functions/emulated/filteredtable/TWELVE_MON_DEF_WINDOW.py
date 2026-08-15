@@ -31,7 +31,7 @@ def duckdb_load(
     SELECT
         DATE '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}}}' AS OBSN_DT,
         '{{{{ task_instance.xcom_pull(task_ids="handle_month_context", key="stream") }}}}' AS STREAM,
-        TRY_CAST(mn.MORT_NUM AS BIGINT) AS MORTGAGE_NO,
+        mn.MORTGAGE_NO,
         obs.TM_LVL_END_DT AS PROCESS_DATE,
         dt.DEFAULT_DATE,
         bal.DEFAULT_BAL,
@@ -46,9 +46,10 @@ def duckdb_load(
         QUALIFY ROW_NUMBER() OVER (PARTITION BY TM_ID ORDER BY TM_LVL_END_DT) = 1
     ) obs ON obs.TM_ID = ind.OBSVTN_MTH_TM_ID
     INNER JOIN (
-        SELECT BASEL_ACCT_ID, OBSN_DT, MORT_NUM
+        SELECT BASEL_ACCT_ID, OBSN_DT, TRY_CAST(MORT_NUM AS BIGINT) AS MORTGAGE_NO
         FROM features.MORT_NUM
         WHERE SRC_SYS_CD = 'MOR'
+          AND TRY_CAST(MORT_NUM AS BIGINT) IS NOT NULL
         QUALIFY ROW_NUMBER() OVER (
             PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY MORT_NUM DESC NULLS LAST
         ) = 1
