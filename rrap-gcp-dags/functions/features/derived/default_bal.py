@@ -5,11 +5,7 @@ from bns.rrap.helpers.asset_event import (
     _push_asset_event_extras,
 )
 
-# MOR 12-month default-observation window (rewrite of RRAP_MOR_MODEL_02_BNS_MOR_PD_G.sas).
-# Scans STATUS (features.PIT_STATUS_CROSS_DEFAULT_ORIG, MOR) + balance (features.CURRENT_BAL, MOR)
-# over [rundate-38mo, rundate], builds 13-month forward windows per obs-start, detects the last
-# CUR->DEF transition. Batched by MOD(HASH(BASEL_ACCT_ID), 6) to bound peak memory
-# (the obs-window fan-out otherwise OOMs on the full MOR population).
+
 UPSTREAM_ASSET = [
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
     "features.CURRENT_BAL",
@@ -42,10 +38,6 @@ RENDER_SQL = """
                 p.batch_count,
                 p.batch_id,
                 LAST_DAY(DATE_TRUNC('month', p.end_period) - INTERVAL 38 MONTH) AS start_period,
-                -- Forward horizon: the obs-start = end_period window looks 12 months
-                -- ahead, so the status/balance scan must reach end_period+12 (SAS
-                -- scans full status_final history with no upper bound). Without this,
-                -- recent obs-windows truncate at rundate and DEFAULT_* come out NULL.
                 LAST_DAY(DATE_TRUNC('month', p.end_period) + INTERVAL 12 MONTH) AS forward_end
             FROM params p
         ),
@@ -275,7 +267,6 @@ def export_mor_batch_6(
     sql=RENDER_SQL.replace("REPLACE_COUNT", "6").replace("REPLACE_ID", "5"),
 ):
     pass
-
 
 
 def duckdb_delete(

@@ -1,15 +1,3 @@
-"""
-Rewrite of RRAP_MOR_MODEL_02_BNS_MOR_PD_G.sas (create_pd_obs_window + last_new_default).
-
-Thin join over the MOR 12-month default-window features. The 13-month observation
-window + CUR->DEF detection now lives in the features (DEFAULT_DATE, DEFAULT_BAL,
-DEFAULT_IND), which scan STATUS + CURRENT_BAL feature history directly — so this table
-no longer reads emulated.STATUS_FINAL or emulated.MORTGAGE_HIST.
-
-One row per (MORTGAGE_NO, OBSVTN_MTH_TM_ID). OBSVTN_MTH_TM_ID identifies the obs-window
-start month; PROCESS_DATE is that obs-window start month-end (SAS mth_end_dt&mm).
-"""
-
 UPSTREAM_ASSET = [
     "features.DEFAULT_IND",
     "features.DEFAULT_DATE",
