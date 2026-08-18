@@ -1,5 +1,6 @@
 
 UPSTREAM_ASSET = [
+    "cbs.MDMFLAGS_OK",
     "emulated.CIS_DATA_NEW2",
     "ingestion.TM_DIM",
     "ingestion.BASEL_ACCT_DIM_MAY_2026",
