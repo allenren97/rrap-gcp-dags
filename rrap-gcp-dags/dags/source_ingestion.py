@@ -10391,6 +10391,135 @@ def source_ingestion():
     cbs_mdm_flags = cbs_mdm_flags()
 
     sq084_start >> sq084 >> cbs_mdm_flags
+
+
+    @task
+    def sq085_start():
+        raise AirflowException("Please mark this task successful to start sequence sq085.")
+
+
+    @task_group(group_id="sq085")
+    def sq085_group():
+
+        @task_group(group_id="sq085_source")
+        def sq085_source_group():
+
+            @task
+            def create_sq085_rundir():
+                context = get_current_context()
+                rundir = context["ti"].xcom_pull(task_ids="handle_month_context", key="RUNDIR")
+                sq085_rundir = f"{rundir}/sq085"
+                os.makedirs(sq085_rundir, exist_ok=True)
+
+
+            @task.beeline(
+                task_id="get_kq_tkq_ks_tsys_xref",
+                beeline_conn_id="edlr-conn",
+                sql="""
+                use {{ var.value.TSZ_SCHEMA }};
+                select
+                    bcm_acct_num,
+                    tsys_acct_id,
+                    client_prod_cd,
+                    tsys_prod_cd,
+                    emp_cd,
+                    ks_plastic_card_num,
+                    bcm_prod_cd,
+                    bcm_sub_prod_cd,
+                    bcm_block_reclass,
+                    tsys_cust_id,
+                    tsys_cust_type_cd,
+                    tsys_plastic_card_num,
+                    transfer_from_acct_num,
+                    bns_cust_id,
+                    conversion_dt,
+                    end_of_chain_indicator,
+                    businesseffectivedate
+                from kq_tkq_ks_tsys_xref;
+                """,
+                schema=pa.schema([
+                    ("bcm_acct_num", pa.string()),
+                    ("tsys_acct_id", pa.string()),
+                    ("client_prod_cd", pa.string()),
+                    ("tsys_prod_cd", pa.string()),
+                    ("emp_cd", pa.string()),
+                    ("ks_plastic_card_num", pa.string()),
+                    ("bcm_prod_cd", pa.string()),
+                    ("bcm_sub_prod_cd", pa.string()),
+                    ("bcm_block_reclass", pa.string()),
+                    ("tsys_cust_id", pa.string()),
+                    ("tsys_cust_type_cd", pa.string()),
+                    ("tsys_plastic_card_num", pa.string()),
+                    ("transfer_from_acct_num", pa.string()),
+                    ("bns_cust_id", pa.string()),
+                    ("conversion_dt", pa.string()),
+                    ("end_of_chain_indicator", pa.string()),
+                    ("businesseffectivedate", pa.date64()),
+                ]),
+                target="kq_tkq_ks_tsys_xref.parquet",
+                rundir="{{ task_instance.xcom_pull(task_ids='handle_month_context', key='RUNDIR') }}/sq085",
+                to_parquet=True,
+                tmpfileloc="/bns/rrap/data/tmp",
+            )
+            def get_kq_tkq_ks_tsys_xref():
+                pass
+
+
+            rundir_task = create_sq085_rundir()
+            extract_task = get_kq_tkq_ks_tsys_xref()
+
+            rundir_task >> extract_task
+
+        @task_group(group_id="sq085_enrichment")
+        def sq085_enrichment_group():
+
+            @task.duckdb(
+                task_id="delete_kq_tkq_ks_tsys_xref",
+                duckdb_conn_id="duckdb-conn",
+                sql="""
+                    DELETE FROM reference.KQ_TKQ_KS_TSYS_XREF
+                """,
+            )
+            def delete_kq_tkq_ks_tsys_xref():
+                pass
+
+
+            @task.duckdb(
+                task_id="load_kq_tkq_ks_tsys_xref",
+                duckdb_conn_id="duckdb-conn",
+                sql="""
+                    INSERT INTO reference.KQ_TKQ_KS_TSYS_XREF BY NAME
+                    SELECT *
+                    FROM '{{ task_instance.xcom_pull(task_ids='handle_month_context', key='RUNDIR') }}/sq085/kq_tkq_ks_tsys_xref.parquet'
+                """,
+            )
+            def load_kq_tkq_ks_tsys_xref():
+                pass
+
+
+            delete_kq_tkq_ks_tsys_xref_task = delete_kq_tkq_ks_tsys_xref()
+            load_kq_tkq_ks_tsys_xref_task = load_kq_tkq_ks_tsys_xref()
+
+            delete_kq_tkq_ks_tsys_xref_task >> load_kq_tkq_ks_tsys_xref_task
+
+        sq085_source_group = sq085_source_group()
+        sq085_enrichment_group = sq085_enrichment_group()
+
+        sq085_source_group >> sq085_enrichment_group
+
+
+    @task(outlets=[AssetAlias("kq_tkq_ks_tsys_xref")])
+    def kq_tkq_ks_tsys_xref(*, outlet_events):
+        outlet_events[AssetAlias("kq_tkq_ks_tsys_xref")].add(
+            Asset("reference.KQ_TKQ_KS_TSYS_XREF", extra={})
+        )
+
+
+    sq085 = sq085_group()
+    sq085_start = sq085_start()
+    kq_tkq_ks_tsys_xref = kq_tkq_ks_tsys_xref()
+
+    sq085_start >> sq085 >> kq_tkq_ks_tsys_xref
     """
     Dependencies from handle_month_context to the first sequence
     """
@@ -10400,7 +10529,7 @@ def source_ingestion():
         sq004, sq015, sq033, sq034, sq018,
         sq011, sq020, sq019, sq006, sq016,
         sq005, sq023, sq001, sq008, sq007,
-        sq084
+        sq084, sq085
     ]
 
     """ Actual dependencies between sequences based on data."""
