@@ -20,6 +20,7 @@ from bns.rrap.helpers.asset_event import (
 # KS is batched 6-way by MOD(HASH(BASEL_ACCT_ID), 6); SPL is a single pass.
 UPSTREAM_ASSET = [
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
+    "features.OS_BAL_AMT_V2",
     "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
     "features.BASEL_PRD_CD",
     "features.HELOC_F",
@@ -167,10 +168,23 @@ def export_spl(
         '{_RUNDATE}' AS OBSN_DT,
         b.BASEL_ACCT_ID,
         b.OBSVTN_MTH_TM_ID,
-        dm.OS_BAL_AMT AS LAST_NEW_DFT_BAL_AMT,
+        CASE
+            WHEN b.OBSVTN_MTH_TM_ID = {_TM} - 24 * 40 THEN v2.OS_BAL_AMT_V2
+            ELSE dm.OS_BAL_AMT
+        END AS LAST_NEW_DFT_BAL_AMT,
         'SPL' AS SRC_SYS_CD
     FROM (SELECT * FROM pdead UNION ALL SELECT * FROM lgd) b
     LEFT JOIN panel dm ON dm.BASEL_ACCT_ID = b.BASEL_ACCT_ID AND dm.mth_tm_id = b.last_new_dft_tm
+    LEFT JOIN ingestion.TM_DIM dtm
+        ON dtm.TM_ID = b.last_new_dft_tm AND TRIM(dtm.TM_LVL) = 'Month'
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OBSN_DT, OS_BAL_AMT_V2
+        FROM features.OS_BAL_AMT_V2
+        WHERE OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 49 MONTH) AND DATE '{_RUNDATE}'
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY OS_BAL_AMT_V2 DESC NULLS LAST
+        ) = 1
+    ) v2 ON v2.BASEL_ACCT_ID = b.BASEL_ACCT_ID AND v2.OBSN_DT = dtm.TM_LVL_END_DT
     """,
 ):
     pass
