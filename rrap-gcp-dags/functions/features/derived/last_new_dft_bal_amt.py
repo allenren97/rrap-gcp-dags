@@ -175,15 +175,19 @@ def export_spl(
         'SPL' AS SRC_SYS_CD
     FROM (SELECT * FROM pdead UNION ALL SELECT * FROM lgd) b
     LEFT JOIN panel dm ON dm.BASEL_ACCT_ID = b.BASEL_ACCT_ID AND dm.mth_tm_id = b.last_new_dft_tm
-    LEFT JOIN ingestion.TM_DIM dtm
-        ON dtm.TM_ID = b.last_new_dft_tm AND TRIM(dtm.TM_LVL) = 'Month'
     LEFT JOIN (
-        SELECT BASEL_ACCT_ID, OBSN_DT, OS_BAL_AMT_V2
+        SELECT TM_ID, MIN(TM_LVL_END_DT) AS TM_LVL_END_DT
+        FROM ingestion.TM_DIM
+        WHERE TRIM(TM_LVL) = 'Month'
+        GROUP BY TM_ID
+    ) dtm ON dtm.TM_ID = b.last_new_dft_tm
+    LEFT JOIN (
+        SELECT BASEL_ACCT_ID, OBSN_DT, MAX(OS_BAL_AMT_V2) AS OS_BAL_AMT_V2
         FROM features.OS_BAL_AMT_V2
-        WHERE OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 49 MONTH) AND DATE '{_RUNDATE}'
-        QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY BASEL_ACCT_ID, OBSN_DT ORDER BY OS_BAL_AMT_V2 DESC NULLS LAST
-        ) = 1
+        WHERE OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 48 MONTH)
+                          AND LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 24 MONTH)
+          AND BASEL_ACCT_ID IN (SELECT BASEL_ACCT_ID FROM lgd)
+        GROUP BY BASEL_ACCT_ID, OBSN_DT
     ) v2 ON v2.BASEL_ACCT_ID = b.BASEL_ACCT_ID AND v2.OBSN_DT = dtm.TM_LVL_END_DT
     """,
 ):
