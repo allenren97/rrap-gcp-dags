@@ -5,23 +5,10 @@ from bns.rrap.helpers.asset_event import (
     _push_asset_event_extras,
 )
 
-# LAST_NEW_DFT_BAL_AMT = outstanding balance at the new-default month found by the
-# same windowed CUR->DEF scan as features.LAST_NEW_DFT_DT (PDEAD [R-12,R] cohort
-# CUR@R-12 -> OBSVTN=R-12; LGD [R-48,R-24] cohort DEF@R-24 -> OBSVTN=R-24).
-#   KS : GREATEST(OS_BAL_AMT [=TOT_NEW_BAL_AMT] at the default month, 0), with the
-#        special case: if that month is CHG or ACCRL_STAT_F='N' and OS_BAL_AMT = 0,
-#        use the prior month's (default_tm - 40) balance instead.
-#   SPL: OS_BAL_AMT V1 (tot_crnt_bal + add_on + accr_intr) at the default month,
-#        computed INLINE from the raw BASEL_PSNL_LOAN_MTH_SNAPSHOT so every historical
-#        month is covered. (SAS uses OS_BAL_AMT_V2 = ...+ int_at_default for DEF/CHG; V1
-#        is used here per request -- it avoids the int_at_default 0s. Sourcing the frozen
-#        features.OS_BAL_AMT keyed by OBSN_DT left the deep LGD months R-24..R-48 NULL,
-#        since that feature only has a row at each run month, so it is computed inline.)
-# KS is batched 6-way by MOD(HASH(BASEL_ACCT_ID), 6); SPL is a single pass.
+
 UPSTREAM_ASSET = [
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
     "features.OS_BAL_AMT_V2",
-    "ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT",
     "features.BASEL_PRD_CD",
     "features.HELOC_F",
     "features.ACCRL_STAT_F",
@@ -60,7 +47,6 @@ def duckdb_delete(
     pass
 
 
-# SPL: balance = OS_BAL_AMT V1 computed inline from the raw snapshot at the default month.
 def export_spl(
     duckdb_conn_id="duckdb-conn",
     resource_tier="HIGH",
@@ -70,27 +56,10 @@ def export_spl(
         SELECT
             pit.BASEL_ACCT_ID,
             tm.TM_ID AS mth_tm_id,
-            TRIM(pit.PIT_STATUS_CROSS_DEFAULT_ORIG) AS pit_status,
-            osb.OS_BAL_AMT
+            TRIM(pit.PIT_STATUS_CROSS_DEFAULT_ORIG) AS pit_status
         FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
         INNER JOIN ingestion.TM_DIM tm
             ON tm.TM_LVL_END_DT = pit.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
-        LEFT JOIN (
-            -- SPL balance computed INLINE from the raw monthly snapshot, using the exact
-            -- OS_BAL_AMT V1 formula (tot_crnt_bal + add_on + accr_intr; os_bal_amt.py:76).
-            -- Sourcing from features.OS_BAL_AMT keyed by OBSN_DT failed for the LGD window:
-            -- that feature is computed only at each run month and stored one OBSN_DT per run,
-            -- so the deep LGD default months (R-24..R-48) had no row -> NULL balance. The raw
-            -- snapshot carries every historical month (this is how SAS sources it), keyed by
-            -- (BASEL_ACCT_ID, mth_tm_id). Dedup to one row per (acct, month) like the panel.
-            SELECT BASEL_ACCT_ID, MTH_TM_ID,
-                COALESCE(TOT_CRNT_BAL_AMT, 0) + COALESCE(ADD_ON_BAL_AMT, 0) + COALESCE(ACCR_INTR, 0) AS OS_BAL_AMT
-            FROM ingestion.BASEL_PSNL_LOAN_MTH_SNAPSHOT
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY BASEL_ACCT_ID, MTH_TM_ID
-                ORDER BY (COALESCE(TOT_CRNT_BAL_AMT, 0) + COALESCE(ADD_ON_BAL_AMT, 0) + COALESCE(ACCR_INTR, 0)) DESC NULLS LAST
-            ) = 1
-        ) osb ON osb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND osb.MTH_TM_ID = tm.TM_ID
         WHERE pit.SRC_SYS_CD = 'SPL'
           AND pit.OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 49 MONTH) AND DATE '{_RUNDATE}'
         QUALIFY ROW_NUMBER() OVER (
@@ -98,13 +67,6 @@ def export_spl(
             ORDER BY pit.PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
         ) = 1
     ),
-    -- PDEAD (R-12) new-default = SAS J_RRAP_TL10_2201 LGD-ND STEP 1/2/3:
-    --   STEP 1  max_def = latest ('DEF','CHG') in [R-11, R]  (obs_month_start+40 .. end)
-    --   STEP 2  mnd_pd  = latest CUR <= max_def in [R-12, R] (last CUR BEFORE the last
-    --                     default); account must have a DEF/CHG (max_def not null)
-    --   STEP 3  date    = earliest ('DEF','CHG') after mnd_pd (earliest if no such CUR)
-    -- Using the *global* last CUR (not <= max_def) dropped accounts that defaulted then
-    -- recovered by R (CUR->DEF->CUR) -- the PDEAD nulls vs prod dates.
     mdd_pd AS (
         SELECT BASEL_ACCT_ID,
             MAX(CASE WHEN pit_status IN ('DEF','CHG') AND mth_tm_id BETWEEN {_TM} - 11 * 40 AND {_TM} THEN mth_tm_id END) AS max_def
@@ -131,19 +93,12 @@ def export_spl(
             GROUP BY p.BASEL_ACCT_ID
         ) WHERE last_new_dft_tm IS NOT NULL
     ),
-    -- LGD (R-24): the observation cohort is accounts that are DEF *at R-24*
-    -- (SAS 2201:2657 PIT_STATUS_V2 IN ('DEF') at obs_month_end). Without that filter
-    -- the emulation flags accounts that defaulted in [R-48,R-24] but charged off /
-    -- recovered / closed by R-24 -- prod excludes them (the prod-NULL vs gen-Y over-flag).
-    -- DEF-only, last CUR in the window, earliest DEF after (LGD-D STEP 2/2B).
     mnd_lgd AS (
         SELECT BASEL_ACCT_ID,
             MAX(CASE WHEN pit_status = 'CUR' AND mth_tm_id BETWEEN {_TM} - 48 * 40 AND {_TM} - 24 * 40 THEN mth_tm_id END) AS mnd,
             MAX(CASE WHEN mth_tm_id = {_TM} - 24 * 40 THEN pit_status END) AS status_r24
         FROM panel GROUP BY BASEL_ACCT_ID
     ),
-    -- TREATMENT_F at R-24 (SAS 2201:2658 TREATMNT_F='A'). features.TREATMENT_F has no
-    -- SRC_SYS_CD column, so resolve the R-24 month via TM_DIM and dedup per account.
     treat_lgd AS (
         SELECT t.BASEL_ACCT_ID, t.TREATMENT_F
         FROM features.TREATMENT_F t
@@ -168,13 +123,9 @@ def export_spl(
         '{_RUNDATE}' AS OBSN_DT,
         b.BASEL_ACCT_ID,
         b.OBSVTN_MTH_TM_ID,
-        CASE
-            WHEN b.OBSVTN_MTH_TM_ID = {_TM} - 24 * 40 THEN v2.OS_BAL_AMT_V2
-            ELSE dm.OS_BAL_AMT
-        END AS LAST_NEW_DFT_BAL_AMT,
+        v2.OS_BAL_AMT_V2 AS LAST_NEW_DFT_BAL_AMT,
         'SPL' AS SRC_SYS_CD
     FROM (SELECT * FROM pdead UNION ALL SELECT * FROM lgd) b
-    LEFT JOIN panel dm ON dm.BASEL_ACCT_ID = b.BASEL_ACCT_ID AND dm.mth_tm_id = b.last_new_dft_tm
     LEFT JOIN (
         SELECT TM_ID, MIN(TM_LVL_END_DT) AS TM_LVL_END_DT
         FROM ingestion.TM_DIM
@@ -185,8 +136,12 @@ def export_spl(
         SELECT BASEL_ACCT_ID, OBSN_DT, MAX(OS_BAL_AMT_V2) AS OS_BAL_AMT_V2
         FROM features.OS_BAL_AMT_V2
         WHERE OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 48 MONTH)
-                          AND LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 24 MONTH)
-          AND BASEL_ACCT_ID IN (SELECT BASEL_ACCT_ID FROM lgd)
+                          AND DATE '{_RUNDATE}'
+          AND BASEL_ACCT_ID IN (
+              SELECT BASEL_ACCT_ID FROM pdead
+              UNION
+              SELECT BASEL_ACCT_ID FROM lgd
+          )
         GROUP BY BASEL_ACCT_ID, OBSN_DT
     ) v2 ON v2.BASEL_ACCT_ID = b.BASEL_ACCT_ID AND v2.OBSN_DT = dtm.TM_LVL_END_DT
     """,
@@ -210,8 +165,6 @@ def export_account_buckets(
     pass
 
 
-# KS: status + balance/charge gate; balance with the CHG/ACCRL prior-month rule.
-# Batched by MOD(HASH(BASEL_ACCT_ID), REPLACE_COUNT) = REPLACE_ID.
 RENDER_KS = """
     WITH batch_accounts AS MATERIALIZED (
         SELECT B.BASEL_ACCT_ID
@@ -271,8 +224,6 @@ RENDER_KS = """
         ) trt ON trt.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND trt.OBSN_DT = pit.OBSN_DT
         WHERE pit.SRC_SYS_CD = 'KS'
           AND pit.OBSN_DT BETWEEN LAST_DAY(DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}' - INTERVAL 49 MONTH) AND DATE '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
-          -- Only the two disjoint windows are scanned (SAS dataprep J_RRII_KS10_2510:66-68):
-          -- PDEAD [R-12,R] and LGD [R-48,R-24]; the gap (R-24, R-12) is excluded.
           AND (tm.TM_ID BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 12 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }}
                OR tm.TM_ID BETWEEN {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 48 * 40 AND {{ task_instance.xcom_pull(task_ids="handle_month_context", key="mth_tm_id") }} - 24 * 40)
         QUALIFY ROW_NUMBER() OVER (
@@ -280,10 +231,6 @@ RENDER_KS = """
             ORDER BY pit.PIT_STATUS_CROSS_DEFAULT_ORIG DESC NULLS LAST
         ) = 1
     ),
-    -- Restrict the CUR->DEF edge scan to snapshot-present months so LAG skips months
-    -- the account has no revolving snapshot for -- matching the SAS dataprep's INNER
-    -- JOIN to BASEL_REVLVNG_CR_MTH_SNAPSHOT (J_RRII_KS10_2510:60-63). obs_status (the
-    -- cohort) stays over the full panel: it comes from the derived vars, not snapshot.
     edge_panel AS (
         SELECT *,
             CASE
@@ -299,9 +246,6 @@ RENDER_KS = """
             LAG(OS_BAL_AMT)  OVER w AS lag_bal,
             LAG(charge)      OVER w AS lag_charge
         FROM edge_panel
-        -- Lag scoped per window: the SAS runs the defaulter macro separately for each
-        -- window (macro WHERE mth_tm_id BETWEEN WINDOW_START AND WINDOW_END), so the
-        -- first in-window month has a NULL lag (no edge detectable at the R-48 LGD start).
         WINDOW w AS (PARTITION BY BASEL_ACCT_ID, wnd ORDER BY mth_tm_id)
     ),
     newdef AS (
