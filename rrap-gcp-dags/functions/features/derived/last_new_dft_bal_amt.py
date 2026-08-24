@@ -8,6 +8,7 @@ from bns.rrap.helpers.asset_event import (
 
 UPSTREAM_ASSET = [
     "features.PIT_STATUS_CROSS_DEFAULT_ORIG",
+    "features.OS_BAL_AMT",
     "features.OS_BAL_AMT_V2",
     "features.BASEL_PRD_CD",
     "features.HELOC_F",
@@ -56,10 +57,18 @@ def export_spl(
         SELECT
             pit.BASEL_ACCT_ID,
             tm.TM_ID AS mth_tm_id,
-            TRIM(pit.PIT_STATUS_CROSS_DEFAULT_ORIG) AS pit_status
+            TRIM(pit.PIT_STATUS_CROSS_DEFAULT_ORIG) AS pit_status,
+            osb.OS_BAL_AMT
         FROM features.PIT_STATUS_CROSS_DEFAULT_ORIG pit
         INNER JOIN ingestion.TM_DIM tm
             ON tm.TM_LVL_END_DT = pit.OBSN_DT AND TRIM(tm.TM_LVL) = 'Month'
+        LEFT JOIN (
+            SELECT BASEL_ACCT_ID, OBSN_DT, MAX(OS_BAL_AMT) AS OS_BAL_AMT
+            FROM features.OS_BAL_AMT
+            WHERE SRC_SYS_CD = 'SPL'
+              AND OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 49 MONTH) AND DATE '{_RUNDATE}'
+            GROUP BY BASEL_ACCT_ID, OBSN_DT
+        ) osb ON osb.BASEL_ACCT_ID = pit.BASEL_ACCT_ID AND osb.OBSN_DT = pit.OBSN_DT
         WHERE pit.SRC_SYS_CD = 'SPL'
           AND pit.OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 49 MONTH) AND DATE '{_RUNDATE}'
         QUALIFY ROW_NUMBER() OVER (
@@ -123,9 +132,13 @@ def export_spl(
         '{_RUNDATE}' AS OBSN_DT,
         b.BASEL_ACCT_ID,
         b.OBSVTN_MTH_TM_ID,
-        v2.OS_BAL_AMT_V2 AS LAST_NEW_DFT_BAL_AMT,
+        CASE
+            WHEN b.OBSVTN_MTH_TM_ID = {_TM} - 24 * 40 THEN v2.OS_BAL_AMT_V2
+            ELSE dm.OS_BAL_AMT
+        END AS LAST_NEW_DFT_BAL_AMT,
         'SPL' AS SRC_SYS_CD
     FROM (SELECT * FROM pdead UNION ALL SELECT * FROM lgd) b
+    LEFT JOIN panel dm ON dm.BASEL_ACCT_ID = b.BASEL_ACCT_ID AND dm.mth_tm_id = b.last_new_dft_tm
     LEFT JOIN (
         SELECT TM_ID, MIN(TM_LVL_END_DT) AS TM_LVL_END_DT
         FROM ingestion.TM_DIM
@@ -136,12 +149,8 @@ def export_spl(
         SELECT BASEL_ACCT_ID, OBSN_DT, MAX(OS_BAL_AMT_V2) AS OS_BAL_AMT_V2
         FROM features.OS_BAL_AMT_V2
         WHERE OBSN_DT BETWEEN LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 48 MONTH)
-                          AND DATE '{_RUNDATE}'
-          AND BASEL_ACCT_ID IN (
-              SELECT BASEL_ACCT_ID FROM pdead
-              UNION
-              SELECT BASEL_ACCT_ID FROM lgd
-          )
+                          AND LAST_DAY(DATE '{_RUNDATE}' - INTERVAL 24 MONTH)
+          AND BASEL_ACCT_ID IN (SELECT BASEL_ACCT_ID FROM lgd)
         GROUP BY BASEL_ACCT_ID, OBSN_DT
     ) v2 ON v2.BASEL_ACCT_ID = b.BASEL_ACCT_ID AND v2.OBSN_DT = dtm.TM_LVL_END_DT
     """,
