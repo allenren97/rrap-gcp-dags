@@ -16,11 +16,20 @@ DEPENDENCIES = {
     "duckdb_delete": ["duckdb_load"],
 }
 
-_DEFAULT_INCOMING = "/bns/rrap/data/cis_load/incoming"
-_DEFAULT_OUT_ROOT = "/bns/rrap/data/cis_load/cis_data_final"
 
+CIS_DATA_ROOT = "/bns/rrap/data"
+CIS_DATA_LANDING = "landing"
+CIS_DATA_OUTPUT = "output"
+
+_RUNDATE_TMPL = (
+    '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") }}'
+)
 _OUT_ROOT_TMPL = (
-    '{{ var.value.get("cis_load_out_root", "' + _DEFAULT_OUT_ROOT + '") }}'
+    '{{ var.value.get("cis_load_out_root", "") or "'
+    + CIS_DATA_ROOT
+    + '/" ~ task_instance.xcom_pull(task_ids="handle_month_context", key="rundate") ~ "/'
+    + CIS_DATA_OUTPUT
+    + '" }}'
 )
 _YYMM_TMPL = (
     '{{ task_instance.xcom_pull(task_ids="handle_month_context", key="yyyymm")[-4:] }}'
@@ -28,17 +37,16 @@ _YYMM_TMPL = (
 
 
 def cis_parse(pool="duckdb_pool", pool_slots=8):
-    """
-    Parse CIS1..CIS8 into <out_root>/FILE_YR_MTH=YYMM/. No-ops when the month is
-    already built, so the per-stream copies of this task group do the work once.
-    """
     from airflow.sdk import Variable
 
     context = get_current_context()
     rundate = context["ti"].xcom_pull(task_ids="handle_month_context", key="rundate")
 
-    incoming = Variable.get("cis_load_incoming", default=_DEFAULT_INCOMING)
-    out_root = Variable.get("cis_load_out_root", default=_DEFAULT_OUT_ROOT)
+    default_incoming = os.path.join(CIS_DATA_ROOT, rundate, CIS_DATA_LANDING)
+    default_out_root = os.path.join(CIS_DATA_ROOT, rundate, CIS_DATA_OUTPUT)
+
+    incoming = Variable.get("cis_load_incoming", default=default_incoming)
+    out_root = Variable.get("cis_load_out_root", default=default_out_root)
     workers = int(Variable.get("cis_load_workers", default="8"))
 
     dags_dir = os.path.join(os.path.dirname(os.path.dirname(
